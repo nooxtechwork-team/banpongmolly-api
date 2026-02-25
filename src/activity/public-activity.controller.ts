@@ -1,0 +1,68 @@
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Activity } from '../entities/activity.entity';
+import {
+  ActivityLeafClass,
+  ActivityService,
+  ActivityPublicDetail,
+} from './activity.service';
+import { CalculateEntriesDto } from './dto/calculate-entries.dto';
+import { CreateActivityRegistrationDto } from './dto/create-activity-registration.dto';
+
+@Controller('activities')
+export class PublicActivityController {
+  constructor(private readonly activityService: ActivityService) {}
+
+  @Get()
+  async list(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: 'open' | 'upcoming' | 'finished',
+    @Query('search') search?: string,
+    @Query('sort') sort?: 'upcoming' | 'latest' | 'oldest',
+  ): Promise<{ items: Activity[]; total: number } | Activity[]> {
+    const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
+    const limitNum = limit
+      ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
+      : 10;
+
+    return this.activityService.findPublicPaginated(pageNum, limitNum, {
+      status,
+      search,
+      sort,
+    });
+  }
+
+  @Get('slug/:slug')
+  async detailBySlug(
+    @Param('slug') slug: string,
+  ): Promise<ActivityPublicDetail> {
+    return this.activityService.getPublicDetailBySlug(slug);
+  }
+
+  @Get('slug/:slug/classes')
+  async listLeafClasses(
+    @Param('slug') slug: string,
+  ): Promise<ActivityLeafClass[]> {
+    return this.activityService.getLeafClassesForSlug(slug);
+  }
+
+  @Post('slug/:slug/calculate-total')
+  async calculateTotal(
+    @Param('slug') slug: string,
+    @Body() dto: CalculateEntriesDto,
+  ) {
+    return this.activityService.calculateEntriesTotalForSlug(slug, dto.entries);
+  }
+
+  @Post('slug/:slug/register')
+  async register(
+    @Param('slug') slug: string,
+    @Body() dto: CreateActivityRegistrationDto,
+  ) {
+    const result = await this.activityService.createRegistrationForSlug(
+      slug,
+      dto,
+    );
+    return result;
+  }
+}

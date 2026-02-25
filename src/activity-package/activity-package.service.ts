@@ -1,0 +1,233 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, IsNull } from 'typeorm';
+import { ActivityPackage } from '../entities/activity-package.entity';
+import { ActivityPackagePrice } from '../entities/activity-package-price.entity';
+import { CreateActivityPackageDto } from './dto/create-activity-package.dto';
+import { UpdateActivityPackageDto } from './dto/update-activity-package.dto';
+
+export interface ActivityPackageWithPrice {
+  id: number;
+  name: string;
+  slug: string;
+  parent_id: number | null;
+  sort_order: number;
+  is_active: boolean;
+  price?: number | null;
+}
+
+export interface ActivityPackageTreeNode extends ActivityPackageWithPrice {
+  children: ActivityPackageTreeNode[];
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}-]/gu, '');
+}
+
+@Injectable()
+export class ActivityPackageService {
+  constructor(
+    @InjectRepository(ActivityPackage)
+    private readonly packageRepository: Repository<ActivityPackage>,
+    @InjectRepository(ActivityPackagePrice)
+    private readonly priceRepository: Repository<ActivityPackagePrice>,
+  ) {}
+
+  async findAll(): Promise<ActivityPackageWithPrice[]> {
+    const packages = await this.packageRepository.find({
+      where: { deleted_at: IsNull() },
+      order: { sort_order: 'ASC', name: 'ASC' },
+    });
+    const prices = await this.priceRepository.find({
+      where: { deleted_at: IsNull() },
+    });
+    const priceMap = new Map<number, number>();
+    prices.forEach((p) => {
+      if (!priceMap.has(p.package_id) && p.is_active) {
+        priceMap.set(p.package_id, Number(p.amount));
+      }
+    });
+    return packages.map((c) => ({
+      ...c,
+      price: priceMap.get(c.id) ?? null,
+    }));
+  }
+
+  async findTree(): Promise<ActivityPackageTreeNode[]> {
+    const packages = await this.findAll();
+    const nodeMap = new Map<number, ActivityPackageTreeNode>();
+
+    packages.forEach((c) => {
+      nodeMap.set(c.id, {
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        sort_order: c.sort_order,
+        is_active: c.is_active,
+        parent_id: c.parent_id,
+        price: c.price ?? null,
+        children: [],
+      });
+    });
+
+    const roots: ActivityPackageTreeNode[] = [];
+    nodeMap.forEach((node) => {
+      if (node.parent_id && nodeMap.has(node.parent_id)) {
+        nodeMap.get(node.parent_id)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+
+    const sortNodes = (nodes: ActivityPackageTreeNode[]) => {
+      nodes.sort((a, b) => {
+        if (a.sort_order !== b.sort_order) {
+          return a.sort_order - b.sort_order;
+        }
+        return a.name.localeCompare(b.name);
+      });
+      nodes.forEach((n) => sortNodes(n.children));
+    };
+
+    sortNodes(roots);
+    return roots;
+  }
+
+  /**
+   * คืนค่าราคาต่ำสุดและสูงสุดจากโหนดลูก (leaf) ของ package ที่กำหนด
+   * ใช้แสดงช่วงราคาในหน้า Activity Detail
+   */
+  async getLeafPriceRangeForPackage(
+    packageId: number | null,
+  ): Promise<{ min: number | null; max: number | null }> {
+    if (packageId == null) {
+      return { min: null, max: null };
+    }
+    const tree = await this.findTree();
+
+    function findNode(
+      nodes: ActivityPackageTreeNode[],
+      id: number,
+    ): ActivityPackageTreeNode | null {
+      for (const node of nodes) {
+        if (node.id === id) return node;
+        const found = findNode(node.children, id);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function collectLeafPrices(node: ActivityPackageTreeNode): number[] {
+      if (node.children.length === 0) {
+        const p = node.price;
+        return p != null && typeof p === 'number' && !Number.isNaN(p)
+          ? [p]
+          : [];
+      }
+      return node.children.flatMap((c) => collectLeafPrices(c));
+    }
+
+    const node = findNode(tree, packageId);
+    if (!node) return { min: null, max: null };
+
+    const prices = collectLeafPrices(node);
+    if (prices.length === 0) return { min: null, max: null };
+
+    return {
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+    };
+  }
+
+  async create(dto: CreateActivityPackageDto): Promise<ActivityPackage> {
+    const pkg = this.packageRepository.create({
+      name: dto.name,
+      slug: dto.slug || slugify(dto.name),
+      parent_id: dto.parent_id ?? null,
+      sort_order: dto.sort_order ?? 0,
+      is_active: dto.is_active ?? true,
+    });
+    const saved = await this.packageRepository.save(pkg);
+    await this.setSinglePrice(saved.id, dto.price);
+    return saved;
+  }
+
+  async update(
+    id: number,
+    dto: UpdateActivityPackageDto,
+  ): Promise<ActivityPackage> {
+    const existing = await this.packageRepository.findOne({
+      where: { id, deleted_at: IsNull() },
+    });
+    if (!existing) {
+      throw new NotFoundException('ไม่พบแพ็กเกจ');
+    }
+
+    if (dto.name !== undefined) existing.name = dto.name;
+    if (dto.slug !== undefined)
+      existing.slug = dto.slug || slugify(existing.name);
+    if (dto.parent_id !== undefined) existing.parent_id = dto.parent_id ?? null;
+    if (dto.sort_order !== undefined) existing.sort_order = dto.sort_order;
+    if (dto.is_active !== undefined) existing.is_active = dto.is_active;
+
+    const saved = await this.packageRepository.save(existing);
+    if (dto.price !== undefined) {
+      await this.setSinglePrice(saved.id, dto.price);
+    }
+    return saved;
+  }
+
+  async softDelete(id: number): Promise<void> {
+    const existing = await this.packageRepository.findOne({
+      where: { id, deleted_at: IsNull() },
+    });
+    if (!existing) {
+      throw new NotFoundException('ไม่พบแพ็กเกจ');
+    }
+    existing.deleted_at = new Date();
+    await this.packageRepository.save(existing);
+
+    const prices = await this.priceRepository.find({
+      where: { package_id: id, deleted_at: IsNull() },
+    });
+    for (const price of prices) {
+      price.deleted_at = new Date();
+      await this.priceRepository.save(price);
+    }
+  }
+
+  private async setSinglePrice(
+    packageId: number,
+    amount?: number | null,
+  ): Promise<void> {
+    const existing = await this.priceRepository.findOne({
+      where: { package_id: packageId, deleted_at: IsNull() },
+    });
+
+    if (amount === undefined || amount === null) {
+      if (existing) {
+        existing.deleted_at = new Date();
+        await this.priceRepository.save(existing);
+      }
+      return;
+    }
+
+    if (existing) {
+      existing.amount = amount;
+      existing.is_active = true;
+      await this.priceRepository.save(existing);
+      return;
+    }
+
+    const price = this.priceRepository.create({
+      package_id: packageId,
+      amount,
+      is_active: true,
+    });
+    await this.priceRepository.save(price);
+  }
+}
