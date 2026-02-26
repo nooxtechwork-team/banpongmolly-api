@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
+import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { User } from '../entities/user.entity';
 
 @Injectable()
@@ -16,6 +17,8 @@ export class OrderService {
     private readonly registrationRepository: Repository<ActivityRegistration>,
     @InjectRepository(Activity)
     private readonly activityRepository: Repository<Activity>,
+    @InjectRepository(SponsorRegistration)
+    private readonly sponsorRepository: Repository<SponsorRegistration>,
   ) {}
 
   async createActivityRegistrationOrder(params: {
@@ -39,6 +42,46 @@ export class OrderService {
     return this.orderRepository.save(entity);
   }
 
+  async createSponsorOrder(params: {
+    sponsorId: number;
+    contactName: string;
+    phone: string;
+    email?: string | null;
+    totalAmount: number;
+  }): Promise<Order> {
+    const entity = this.orderRepository.create({
+      order_no: generateReferenceNo('ORD'),
+      type: OrderType.SPONSOR,
+      refer_id: params.sponsorId,
+      customer_name: params.contactName,
+      customer_phone: params.phone,
+      customer_email: params.email ?? null,
+      total_amount: params.totalAmount,
+      status: OrderStatus.PENDING,
+      payment_ref: null,
+    });
+    return this.orderRepository.save(entity);
+  }
+
+  async syncSponsorOrder(sponsor: SponsorRegistration): Promise<void> {
+    const order = await this.orderRepository.findOne({
+      where: { type: OrderType.SPONSOR, refer_id: sponsor.id },
+    });
+    if (!order) return;
+    order.customer_name = sponsor.contact_name;
+    order.customer_phone = sponsor.contact_phone;
+    order.customer_email = sponsor.contact_email ?? null;
+    order.total_amount = sponsor.amount;
+    await this.orderRepository.save(order);
+  }
+
+  async deleteSponsorOrders(sponsorId: number): Promise<void> {
+    await this.orderRepository.delete({
+      type: OrderType.SPONSOR,
+      refer_id: sponsorId,
+    });
+  }
+
   /**
    * คืนรายการคำสั่งซื้อของผู้ใช้ปัจจุบัน (ใช้ email/phone ผูกกับ order)
    */
@@ -51,7 +94,10 @@ export class OrderService {
       type?: OrderType;
       search?: string;
     },
-  ): Promise<{ items: Order[]; total: number }> {
+  ): Promise<{
+    items: (Order & { activity_title?: string | null })[];
+    total: number;
+  }> {
     const page = options?.page && options.page > 0 ? options.page : 1;
     const limitRaw = options?.limit && options.limit > 0 ? options.limit : 10;
     const limit = Math.min(Math.max(1, limitRaw), 100);
@@ -95,7 +141,74 @@ export class OrderService {
       .take(limit)
       .getManyAndCount();
 
-    return { items, total };
+    if (!items.length) {
+      return { items, total };
+    }
+
+    const activityRegIds = items
+      .filter((o) => o.type === OrderType.ACTIVITY_REGISTRATION)
+      .map((o) => o.refer_id);
+    const sponsorIds = items
+      .filter((o) => o.type === OrderType.SPONSOR)
+      .map((o) => o.refer_id);
+
+    const [registrations, sponsors] = await Promise.all([
+      activityRegIds.length
+        ? this.registrationRepository.find({
+            where: { id: In(activityRegIds) },
+          })
+        : Promise.resolve([]),
+      sponsorIds.length
+        ? this.sponsorRepository.find({
+            where: { id: In(sponsorIds) },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const activityIds = new Set<number>();
+    for (const reg of registrations) {
+      activityIds.add(reg.activity_id);
+    }
+    for (const s of sponsors) {
+      activityIds.add(s.activity_id);
+    }
+
+    const activities = activityIds.size
+      ? await this.activityRepository.find({
+          where: { id: In(Array.from(activityIds)) },
+        })
+      : [];
+
+    const regById = new Map<number, ActivityRegistration>();
+    for (const reg of registrations) {
+      regById.set(reg.id, reg);
+    }
+    const sponsorById = new Map<number, SponsorRegistration>();
+    for (const s of sponsors) {
+      sponsorById.set(s.id, s);
+    }
+    const activityById = new Map<number, Activity>();
+    for (const act of activities) {
+      activityById.set(act.id, act);
+    }
+
+    const enriched = items.map((o) => {
+      let title: string | null = null;
+      if (o.type === OrderType.ACTIVITY_REGISTRATION) {
+        const reg = regById.get(o.refer_id);
+        if (reg) {
+          title = activityById.get(reg.activity_id)?.title ?? null;
+        }
+      } else if (o.type === OrderType.SPONSOR) {
+        const sponsor = sponsorById.get(o.refer_id);
+        if (sponsor) {
+          title = activityById.get(sponsor.activity_id)?.title ?? null;
+        }
+      }
+      return Object.assign(o, { activity_title: title });
+    });
+
+    return { items: enriched, total };
   }
 
   /**
@@ -108,6 +221,7 @@ export class OrderService {
   ): Promise<{
     order: Order;
     registration: ActivityRegistration | null;
+    sponsor: SponsorRegistration | null;
     activity: Activity | null;
     entries: {
       package_id: number;
@@ -138,6 +252,7 @@ export class OrderService {
     }
 
     let registration: ActivityRegistration | null = null;
+    let sponsor: SponsorRegistration | null = null;
     let activity: Activity | null = null;
     let entries: {
       package_id: number;
@@ -170,11 +285,22 @@ export class OrderService {
           where: { id: registration.activity_id },
         });
       }
+    } else if (order.type === OrderType.SPONSOR) {
+      sponsor = await this.sponsorRepository.findOne({
+        where: { id: order.refer_id },
+      });
+
+      if (sponsor) {
+        activity = await this.activityRepository.findOne({
+          where: { id: sponsor.activity_id },
+        });
+      }
     }
 
     return {
       order,
       registration,
+      sponsor,
       activity,
       entries,
     };
@@ -356,6 +482,151 @@ export class OrderService {
     };
   }
 
+  // ADMIN: list sponsor payments with pagination
+  async findAdminSponsorPayments(
+    page: number = 1,
+    limit: number = 10,
+    options?: {
+      status?: OrderStatus | 'all';
+      search?: string;
+    },
+  ): Promise<{
+    items: {
+      order_id: number;
+      order_no: string;
+      sponsor_name: string;
+      contact_name: string;
+      activity_title: string;
+      total_amount: number;
+      status: OrderStatus;
+      created_at: string;
+    }[];
+    total: number;
+  }> {
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const safePage = Math.max(1, page);
+
+    const baseQb = this.orderRepository
+      .createQueryBuilder('order')
+      .innerJoin(SponsorRegistration, 'sponsor', 'sponsor.id = order.refer_id')
+      .innerJoin(Activity, 'act', 'act.id = sponsor.activity_id')
+      .where('order.type = :type', {
+        type: OrderType.SPONSOR,
+      });
+
+    if (options?.status && options.status !== 'all') {
+      baseQb.andWhere('order.status = :status', {
+        status: options.status,
+      });
+    }
+
+    if (options?.search?.trim()) {
+      const q = `%${options.search.trim()}%`;
+      baseQb.andWhere(
+        '(order.order_no LIKE :q OR sponsor.brand_display_name LIKE :q OR sponsor.contact_name LIKE :q OR act.title LIKE :q)',
+        { q },
+      );
+    }
+
+    const countQb = baseQb.clone();
+    const total = await countQb.getCount();
+
+    const raws = await baseQb
+      .select([
+        'order.id AS order_id',
+        'order.order_no AS order_no',
+        'order.status AS status',
+        'order.total_amount AS total_amount',
+        'order.created_at AS created_at',
+        'sponsor.brand_display_name AS sponsor_name',
+        'sponsor.contact_name AS contact_name',
+        'act.title AS activity_title',
+      ])
+      .orderBy('order.created_at', 'DESC')
+      .offset((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .getRawMany();
+
+    const items = (raws || []).map((r: any) => ({
+      order_id: Number(r.order_id),
+      order_no: r.order_no as string,
+      sponsor_name: r.sponsor_name as string,
+      contact_name: r.contact_name as string,
+      activity_title: r.activity_title as string,
+      total_amount: Number(r.total_amount) || 0,
+      status: r.status as OrderStatus,
+      created_at: new Date(r.created_at).toISOString(),
+    }));
+
+    return { items, total };
+  }
+
+  // ADMIN: get single sponsor payment detail – order, sponsor (with payment_slip), activity
+  async findAdminSponsorPaymentDetail(orderId: number): Promise<{
+    order: {
+      id: number;
+      order_no: string;
+      status: OrderStatus;
+      total_amount: number;
+      created_at: string;
+    };
+    sponsor: {
+      id: number;
+      sponsor_no: string;
+      brand_display_name: string;
+      contact_name: string;
+      contact_phone: string;
+      contact_email: string | null;
+      tier: SponsorTier;
+      amount: number;
+      payment_slip: string | null;
+    } | null;
+    activity: { id: number; title: string } | null;
+  }> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId, type: OrderType.SPONSOR },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+
+    let sponsor: SponsorRegistration | null = null;
+    let activity: Activity | null = null;
+
+    sponsor = await this.sponsorRepository.findOne({
+      where: { id: order.refer_id },
+    });
+    if (sponsor) {
+      activity = await this.activityRepository.findOne({
+        where: { id: sponsor.activity_id },
+      });
+    }
+
+    return {
+      order: {
+        id: order.id,
+        order_no: order.order_no,
+        status: order.status,
+        total_amount: Number(order.total_amount),
+        created_at: new Date(order.created_at).toISOString(),
+      },
+      sponsor: sponsor
+        ? {
+            id: sponsor.id,
+            sponsor_no: sponsor.sponsor_no,
+            brand_display_name: sponsor.brand_display_name,
+            contact_name: sponsor.contact_name,
+            contact_phone: sponsor.contact_phone,
+            contact_email: sponsor.contact_email,
+            tier: sponsor.tier,
+            amount: Number(sponsor.amount),
+            payment_slip: sponsor.payment_slip,
+          }
+        : null,
+      activity: activity ? { id: activity.id, title: activity.title } : null,
+    };
+  }
+
   // ADMIN: update payment status (approve / reject)
   async updateStatusAdmin(
     orderId: number,
@@ -408,7 +679,7 @@ export class OrderService {
         .andWhere('order.status = :status', {
           status: OrderStatus.PAID,
         })
-        .andWhere('order.created_at BETWEEN :start AND :end', {
+        .andWhere('order.updated_at BETWEEN :start AND :end', {
           start: todayStart,
           end: todayEnd,
         })
@@ -421,7 +692,71 @@ export class OrderService {
         .andWhere('order.status = :status', {
           status: OrderStatus.CANCELLED,
         })
-        .andWhere('order.created_at BETWEEN :start AND :end', {
+        .andWhere('order.updated_at BETWEEN :start AND :end', {
+          start: todayStart,
+          end: todayEnd,
+        })
+        .getCount(),
+    ]);
+
+    return {
+      pending,
+      approved_today: approvedToday,
+      rejected_today: rejectedToday,
+    };
+  }
+
+  // ADMIN: summary cards for sponsor payments page
+  async getAdminSponsorPaymentsSummary(): Promise<{
+    pending: number;
+    approved_today: number;
+    rejected_today: number;
+  }> {
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999,
+    );
+
+    const [pending, approvedToday, rejectedToday] = await Promise.all([
+      this.orderRepository.count({
+        where: {
+          type: OrderType.SPONSOR,
+          status: OrderStatus.PENDING,
+        },
+      }),
+      this.orderRepository
+        .createQueryBuilder('order')
+        .where('order.type = :type', {
+          type: OrderType.SPONSOR,
+        })
+        .andWhere('order.status = :status', {
+          status: OrderStatus.PAID,
+        })
+        .andWhere('order.updated_at BETWEEN :start AND :end', {
+          start: todayStart,
+          end: todayEnd,
+        })
+        .getCount(),
+      this.orderRepository
+        .createQueryBuilder('order')
+        .where('order.type = :type', {
+          type: OrderType.SPONSOR,
+        })
+        .andWhere('order.status = :status', {
+          status: OrderStatus.CANCELLED,
+        })
+        .andWhere('order.updated_at BETWEEN :start AND :end', {
           start: todayStart,
           end: todayEnd,
         })

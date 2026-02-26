@@ -355,14 +355,15 @@ export class ActivityService {
    */
   async getPublicDetailBySlug(slug: string): Promise<ActivityPublicDetail> {
     const activity = await this.findOneBySlug(slug);
-    const [price_range, rewards, tags] = await Promise.all([
+    const [price_range, rewards, tags, sponsor_packages] = await Promise.all([
       this.activityPackageService.getLeafPriceRangeForPackage(
         activity.activity_package_id,
       ),
       this.activityRewardService.findByActivityId(activity.id),
       this.activityTagService.getTagsForActivity(activity.id),
+      this.getSponsorPackagesForActivity(activity.id),
     ]);
-    return { ...activity, price_range, rewards, tags };
+    return { ...activity, price_range, rewards, tags, sponsor_packages };
   }
 
   /**

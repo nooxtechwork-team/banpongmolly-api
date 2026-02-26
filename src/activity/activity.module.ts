@@ -34,5 +34,6 @@ import { OrderModule } from '../order/order.module';
   ],
   providers: [ActivityService, ActivityRewardService, ActivityTagService, AdminGuard],
   controllers: [ActivityController, PublicActivityController],
+  exports: [ActivityService],
 })
 export class ActivityModule {}

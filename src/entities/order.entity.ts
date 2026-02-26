@@ -8,7 +8,7 @@ import {
 
 export enum OrderType {
   ACTIVITY_REGISTRATION = 'activity_registration',
-  SPONSOR = 'sponsor',
+  SPONSOR = 'sponsor_registration',
 }
 
 export enum OrderStatus {

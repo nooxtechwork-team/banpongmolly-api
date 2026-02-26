@@ -8,8 +8,6 @@ import {
 
 export type SponsorTier = 'supporter' | 'main' | 'premium';
 
-export type SponsorStatus = 'pending_payment_review' | 'active' | 'cancelled';
-
 @Entity('sponsor_registrations')
 export class SponsorRegistration {
   @PrimaryGeneratedColumn()
@@ -67,13 +65,9 @@ export class SponsorRegistration {
   @Column({ type: 'varchar', length: 50, nullable: true })
   tax_id: string | null;
 
-  /** สถานะการสมัครสปอนเซอร์ */
-  @Column({
-    type: 'varchar',
-    length: 32,
-    default: 'pending_payment_review',
-  })
-  status: SponsorStatus;
+  /** หลักฐานการโอนเงิน (URL รูป/ไฟล์) */
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  payment_slip: string | null;
 
   @CreateDateColumn()
   created_at: Date;

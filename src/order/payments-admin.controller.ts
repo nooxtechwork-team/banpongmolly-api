@@ -41,11 +41,41 @@ export class PaymentsAdminController {
     });
   }
 
+  @Get('sponsors')
+  async listSponsors(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ): Promise<Awaited<ReturnType<typeof this.orderService.findAdminSponsorPayments>>> {
+    const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
+    const limitNum = limit
+      ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
+      : 10;
+    let statusEnum: OrderStatus | 'all' | undefined;
+    if (status === 'pending') statusEnum = OrderStatus.PENDING;
+    else if (status === 'paid') statusEnum = OrderStatus.PAID;
+    else if (status === 'cancelled') statusEnum = OrderStatus.CANCELLED;
+    else if (status === 'all') statusEnum = 'all';
+
+    return this.orderService.findAdminSponsorPayments(pageNum, limitNum, {
+      status: statusEnum,
+      search: search?.trim() || undefined,
+    });
+  }
+
   @Get('summary')
   async summary(): Promise<
     Awaited<ReturnType<typeof this.orderService.getAdminPaymentsSummary>>
   > {
     return this.orderService.getAdminPaymentsSummary();
+  }
+
+  @Get('sponsors/summary')
+  async sponsorsSummary(): Promise<
+    Awaited<ReturnType<typeof this.orderService.getAdminSponsorPaymentsSummary>>
+  > {
+    return this.orderService.getAdminSponsorPaymentsSummary();
   }
 
   @Get(':id')
@@ -55,6 +85,15 @@ export class PaymentsAdminController {
     Awaited<ReturnType<typeof this.orderService.findAdminPaymentDetail>>
   > {
     return this.orderService.findAdminPaymentDetail(id);
+  }
+
+  @Get('sponsors/:id')
+  async getSponsorDetail(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<
+    Awaited<ReturnType<typeof this.orderService.findAdminSponsorPaymentDetail>>
+  > {
+    return this.orderService.findAdminSponsorPaymentDetail(id);
   }
 
   @Post(':id/approve')

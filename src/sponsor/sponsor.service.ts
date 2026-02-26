@@ -1,13 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
-import {
-  SponsorRegistration,
-  SponsorStatus,
-  SponsorTier,
-} from '../entities/sponsor.entity';
+import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { Activity } from '../entities/activity.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
+import { OrderService } from '../order/order.service';
 
 export interface SponsorListItem {
   id: number;
@@ -17,7 +14,6 @@ export interface SponsorListItem {
   amount: number;
   activity_id: number;
   activity_title: string | null;
-  status: SponsorStatus;
   created_at: string;
 }
 export interface SponsorListOptions {
@@ -26,7 +22,6 @@ export interface SponsorListOptions {
   search?: string;
   tier?: SponsorTier | 'all';
   activity_id?: number;
-  status?: SponsorStatus | 'all';
 }
 
 @Injectable()
@@ -36,6 +31,7 @@ export class SponsorService {
     private readonly sponsorRepo: Repository<SponsorRegistration>,
     @InjectRepository(Activity)
     private readonly activityRepo: Repository<Activity>,
+    private readonly orderService: OrderService,
   ) {}
 
   async listAdmin(
@@ -64,10 +60,6 @@ export class SponsorService {
       qb.andWhere('sponsor.activity_id = :activity_id', {
         activity_id: options.activity_id,
       });
-    }
-
-    if (options.status && options.status !== 'all') {
-      qb.andWhere('sponsor.status = :status', { status: options.status });
     }
 
     qb.orderBy('sponsor.created_at', 'DESC');
@@ -100,7 +92,6 @@ export class SponsorService {
       amount: Number(s.amount),
       activity_id: s.activity_id,
       activity_title: activityMap.get(s.activity_id)?.title ?? null,
-      status: s.status,
       created_at: s.created_at.toISOString(),
     }));
 
@@ -113,6 +104,96 @@ export class SponsorService {
       throw new NotFoundException('ไม่พบข้อมูลสปอนเซอร์');
     }
     return sponsor;
+  }
+
+  async createAdmin(payload: {
+    activity_id: number;
+    tier: SponsorTier;
+    amount: number;
+    contact_name: string;
+    contact_phone: string;
+    contact_email?: string | null;
+    contact_line_id?: string | null;
+    brand_display_name: string;
+    logo_url?: string | null;
+    receipt_name?: string | null;
+    receipt_address?: string | null;
+    tax_id?: string | null;
+    payment_slip?: string | null;
+  }): Promise<SponsorRegistration> {
+    const { sponsor } = await this.createFromSubmission(payload);
+    return sponsor;
+  }
+
+  async updateAdmin(
+    id: number,
+    payload: Partial<{
+      activity_id: number;
+      tier: SponsorTier;
+      amount: number;
+      contact_name: string;
+      contact_phone: string;
+      contact_email?: string | null;
+      contact_line_id?: string | null;
+      brand_display_name: string;
+      logo_url?: string | null;
+      receipt_name?: string | null;
+      receipt_address?: string | null;
+      tax_id?: string | null;
+      payment_slip?: string | null;
+    }>,
+  ): Promise<SponsorRegistration> {
+    const sponsor = await this.findOneAdmin(id);
+
+    if (payload.activity_id !== undefined) {
+      sponsor.activity_id = payload.activity_id;
+    }
+    if (payload.tier !== undefined) {
+      sponsor.tier = payload.tier;
+    }
+    if (payload.amount !== undefined) {
+      sponsor.amount = payload.amount;
+    }
+    if (payload.contact_name !== undefined) {
+      sponsor.contact_name = payload.contact_name;
+    }
+    if (payload.contact_phone !== undefined) {
+      sponsor.contact_phone = payload.contact_phone;
+    }
+    if (payload.contact_email !== undefined) {
+      sponsor.contact_email = payload.contact_email ?? null;
+    }
+    if (payload.contact_line_id !== undefined) {
+      sponsor.contact_line_id = payload.contact_line_id ?? null;
+    }
+    if (payload.brand_display_name !== undefined) {
+      sponsor.brand_display_name = payload.brand_display_name;
+    }
+    if (payload.logo_url !== undefined) {
+      sponsor.logo_url = payload.logo_url ?? null;
+    }
+    if (payload.receipt_name !== undefined) {
+      sponsor.receipt_name = payload.receipt_name ?? null;
+    }
+    if (payload.receipt_address !== undefined) {
+      sponsor.receipt_address = payload.receipt_address ?? null;
+    }
+    if (payload.tax_id !== undefined) {
+      sponsor.tax_id = payload.tax_id ?? null;
+    }
+    if (payload.payment_slip !== undefined) {
+      sponsor.payment_slip = payload.payment_slip ?? null;
+    }
+
+    const saved = await this.sponsorRepo.save(sponsor);
+    await this.orderService.syncSponsorOrder(saved);
+    return saved;
+  }
+
+  async deleteAdmin(id: number): Promise<void> {
+    const sponsor = await this.findOneAdmin(id);
+    await this.orderService.deleteSponsorOrders(id);
+    await this.sponsorRepo.remove(sponsor);
   }
 
   async createFromSubmission(payload: {
@@ -128,7 +209,16 @@ export class SponsorService {
     receipt_name?: string | null;
     receipt_address?: string | null;
     tax_id?: string | null;
-  }): Promise<SponsorRegistration> {
+    payment_slip?: string | null;
+  }): Promise<{
+    sponsor: SponsorRegistration;
+    order: {
+      id: number;
+      order_no: string;
+      total_amount: number;
+      status: string;
+    };
+  }> {
     const sponsor = this.sponsorRepo.create({
       sponsor_no: generateReferenceNo('SP'),
       activity_id: payload.activity_id,
@@ -143,17 +233,28 @@ export class SponsorService {
       receipt_name: payload.receipt_name ?? null,
       receipt_address: payload.receipt_address ?? null,
       tax_id: payload.tax_id ?? null,
-      status: 'pending_payment_review',
+      payment_slip: payload.payment_slip ?? null,
     });
-    return this.sponsorRepo.save(sponsor);
-  }
 
-  async updateStatus(
-    id: number,
-    status: SponsorStatus,
-  ): Promise<SponsorRegistration> {
-    const sponsor = await this.findOneAdmin(id);
-    sponsor.status = status;
-    return this.sponsorRepo.save(sponsor);
+    const saved = await this.sponsorRepo.save(sponsor);
+
+    // สร้าง Order ผูกกับการสมัครสปอนเซอร์นี้
+    const order = await this.orderService.createSponsorOrder({
+      sponsorId: saved.id,
+      contactName: saved.contact_name,
+      phone: saved.contact_phone,
+      email: saved.contact_email,
+      totalAmount: Number(saved.amount),
+    });
+
+    return {
+      sponsor: saved,
+      order: {
+        id: order.id,
+        order_no: order.order_no,
+        total_amount: Number(order.total_amount),
+        status: order.status,
+      },
+    };
   }
 }
