@@ -13,7 +13,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ActivityService } from './activity.service';
-import { ActivityRewardService, ActivityRewardDto } from './activity-reward.service';
+import {
+  ActivityRewardService,
+  ActivityRewardDto,
+} from './activity-reward.service';
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { ActivityStatus } from '../entities/activity.entity';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -73,6 +76,12 @@ export class ActivityController {
     return this.activityService.findOne(id);
   }
 
+  @Get(':id/sponsor-packages')
+  async getSponsorPackages(@Param('id', ParseIntPipe) id: number) {
+    await this.activityService.findOne(id);
+    return this.activityService.getSponsorPackagesForActivity(id);
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreateActivityDto): Promise<Activity> {
@@ -94,6 +103,21 @@ export class ActivityController {
     @Body() dto: UpdateActivityDto,
   ): Promise<Activity> {
     return this.activityService.update(id, dto);
+  }
+
+  @Patch(':id/sponsor-packages')
+  async setSponsorPackages(
+    @Param('id', ParseIntPipe) id: number,
+    @Body()
+    body: {
+      package_ids: number[];
+    },
+  ) {
+    await this.activityService.setSponsorPackagesForActivity(
+      id,
+      body?.package_ids ?? [],
+    );
+    return this.activityService.getSponsorPackagesForActivity(id);
   }
 
   @Delete(':id')

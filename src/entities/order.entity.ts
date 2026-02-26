@@ -30,7 +30,7 @@ export class Order {
   type: OrderType;
 
   /**
-   * อ้างอิง id ของ table ต้นทาง เช่น activity_registrations.id หรือ sponsors.id
+   * อ้างอิง id ของ table ต้นทาง เช่น activity_registrations.id หรือ sponsor_registrations.id
    */
   @Column({ type: 'int' })
   refer_id: number;

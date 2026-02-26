@@ -61,4 +61,8 @@ export class ActivityRegistration {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  /** เวลาที่เช็คอิน (null = ยังไม่เช็คอิน) */
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  checked_in_at: Date | null;
 }

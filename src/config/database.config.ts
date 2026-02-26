@@ -11,6 +11,9 @@ import { ActivityReward } from '../entities/activity-reward.entity';
 import { Tag } from '../entities/tag.entity';
 import { ActivityTag } from '../entities/activity-tag.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
+import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
+import { SponsorRegistration } from '../entities/sponsor.entity';
+import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { Order } from '../entities/order.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 
@@ -35,6 +38,9 @@ export const getDatabaseConfig = (
     Tag,
     ActivityTag,
     ActivityRegistration,
+    ActivitySponsorPackage,
+    SponsorRegistration,
+    SponsorPackage,
     Order,
     AuditLog,
   ],

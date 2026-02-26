@@ -13,6 +13,7 @@ import { UploadModule } from './upload/upload.module';
 import { UserModule } from './user/user.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { OrderModule } from './order/order.module';
+import { SponsorModule } from './sponsor/sponsor.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -36,6 +37,7 @@ import { getDatabaseConfig } from './config/database.config';
     UserModule,
     AuditLogModule,
     OrderModule,
+    SponsorModule,
   ],
   controllers: [AppController],
   providers: [AppService],

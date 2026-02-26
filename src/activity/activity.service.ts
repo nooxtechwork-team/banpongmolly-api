@@ -4,9 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { Activity, ActivityStatus } from '../entities/activity.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
+import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
+import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { ActivityPackageTreeNode as AptNode } from '../activity-package/activity-package.service';
 import { OrderService } from '../order/order.service';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -34,6 +36,7 @@ export type ActivityPublicDetail = Activity & {
   price_range: { min: number | null; max: number | null };
   rewards?: ActivityRewardDto[];
   tags?: ActivityTagDto[];
+  sponsor_packages?: SponsorPackage[];
 };
 
 export interface ActivityLeafClass {
@@ -50,6 +53,10 @@ export class ActivityService {
     private readonly activityRepository: Repository<Activity>,
     @InjectRepository(ActivityRegistration)
     private readonly registrationRepository: Repository<ActivityRegistration>,
+    @InjectRepository(ActivitySponsorPackage)
+    private readonly activitySponsorPkgRepo: Repository<ActivitySponsorPackage>,
+    @InjectRepository(SponsorPackage)
+    private readonly sponsorPackageRepo: Repository<SponsorPackage>,
     private readonly uploadService: UploadService,
     private readonly activityPackageService: ActivityPackageService,
     private readonly activityRewardService: ActivityRewardService,
@@ -290,6 +297,47 @@ export class ActivityService {
       throw new NotFoundException('ไม่พบกิจกรรม');
     }
     return event;
+  }
+
+  async getSponsorPackagesForActivity(
+    activityId: number,
+  ): Promise<SponsorPackage[]> {
+    const mappings = await this.activitySponsorPkgRepo.find({
+      where: { activity_id: activityId },
+    });
+    if (!mappings.length) return [];
+    const ids = mappings.map((m) => m.sponsor_package_id);
+    const uniqueIds = Array.from(new Set(ids));
+    return this.sponsorPackageRepo.find({
+      where: { id: In(uniqueIds), is_active: true },
+      order: { amount: 'ASC' },
+    });
+  }
+
+  async setSponsorPackagesForActivity(
+    activityId: number,
+    packageIds: number[],
+  ): Promise<void> {
+    await this.findOne(activityId);
+    const uniqueIds = Array.from(
+      new Set(
+        (packageIds || []).filter(
+          (id) => typeof id === 'number' && !Number.isNaN(id),
+        ),
+      ),
+    );
+
+    await this.activitySponsorPkgRepo.delete({ activity_id: activityId });
+
+    if (!uniqueIds.length) return;
+
+    const entities = uniqueIds.map((id) =>
+      this.activitySponsorPkgRepo.create({
+        activity_id: activityId,
+        sponsor_package_id: id,
+      }),
+    );
+    await this.activitySponsorPkgRepo.save(entities);
   }
 
   async findOneBySlug(slug: string): Promise<Activity> {
