@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -95,28 +95,29 @@ export class OrderService {
       search?: string;
     },
   ): Promise<{
-    items: (Order & { activity_title?: string | null })[];
+    items: (Order & { activity_title?: string | null; registration_no?: string | null })[];
     total: number;
   }> {
     const page = options?.page && options.page > 0 ? options.page : 1;
     const limitRaw = options?.limit && options.limit > 0 ? options.limit : 10;
     const limit = Math.min(Math.max(1, limitRaw), 100);
 
-    const qb = this.orderRepository
-      .createQueryBuilder('order')
-      .where('order.customer_email = :email', {
-        email: user.email.toLowerCase(),
-      });
+    const qb = this.orderRepository.createQueryBuilder('order');
 
-    // fallback ถ้าเก็บแค่เบอร์โทร (แต่ user ไม่มี email ใน order)
-    if (user.phone_number) {
-      qb.orWhere(
-        '(order.customer_email IS NULL AND order.customer_phone = :phone)',
-        {
-          phone: user.phone_number,
-        },
-      );
-    }
+    // เงื่อนไขเจ้าของ order: (email ตรง หรือ ไม่มี email แต่เบอร์ตรง) — ใส่ bracket เพื่อให้ AND status/type ใช้กับทั้งก้อน
+    qb.where(
+      new Brackets((sub) => {
+        sub.where('order.customer_email = :email', {
+          email: user.email.toLowerCase(),
+        });
+        if (user.phone_number) {
+          sub.orWhere(
+            '(order.customer_email IS NULL AND order.customer_phone = :phone)',
+            { phone: user.phone_number },
+          );
+        }
+      }),
+    );
 
     if (options?.status) {
       qb.andWhere('order.status = :status', { status: options.status });
@@ -194,10 +195,12 @@ export class OrderService {
 
     const enriched = items.map((o) => {
       let title: string | null = null;
+      let registrationNo: string | null = null;
       if (o.type === OrderType.ACTIVITY_REGISTRATION) {
         const reg = regById.get(o.refer_id);
         if (reg) {
           title = activityById.get(reg.activity_id)?.title ?? null;
+          registrationNo = reg.registration_no ?? null;
         }
       } else if (o.type === OrderType.SPONSOR) {
         const sponsor = sponsorById.get(o.refer_id);
@@ -205,7 +208,7 @@ export class OrderService {
           title = activityById.get(sponsor.activity_id)?.title ?? null;
         }
       }
-      return Object.assign(o, { activity_title: title });
+      return Object.assign(o, { activity_title: title, registration_no: registrationNo ?? undefined });
     });
 
     return { items: enriched, total };
