@@ -84,6 +84,8 @@ export class ActivityService {
       end_date: Date;
       location_name: string;
       status: ActivityStatus;
+      registration_open_at: Date | null;
+      registration_deadline: Date | null;
     }[]
   > {
     const qb = this.activityRepository
@@ -106,6 +108,8 @@ export class ActivityService {
       end_date: a.end_date,
       location_name: a.location_name,
       status: a.status,
+      registration_open_at: a.registration_open_at,
+      registration_deadline: a.registration_deadline,
     }));
   }
 
@@ -174,8 +178,21 @@ export class ActivityService {
     };
   }> {
     const activity = await this.findOneBySlug(slug);
+    const now = new Date();
+
     if (activity.status !== ActivityStatus.OPEN) {
       throw new BadRequestException('กิจกรรมนี้ไม่ได้เปิดรับสมัครแล้ว');
+    }
+
+    if (activity.registration_open_at && now < activity.registration_open_at) {
+      throw new BadRequestException('กิจกรรมนี้ยังไม่ถึงเวลาเปิดรับสมัคร');
+    }
+
+    if (
+      activity.registration_deadline &&
+      now > activity.registration_deadline
+    ) {
+      throw new BadRequestException('กิจกรรมนี้ปิดรับสมัครแล้ว');
     }
 
     const { total_amount, items } = await this.calculateEntriesTotalForSlug(
@@ -399,10 +416,7 @@ export class ActivityService {
   /**
    * เปิด/ปิดการแสดงกิจกรรมบนหน้าแรก
    */
-  async setHomepageFeatured(
-    id: number,
-    featured: boolean,
-  ): Promise<Activity> {
+  async setHomepageFeatured(id: number, featured: boolean): Promise<Activity> {
     const activity = await this.findOne(id);
     activity.is_featured_homepage = !!featured;
     return this.activityRepository.save(activity);
@@ -498,6 +512,9 @@ export class ActivityService {
       end_date: endDate,
       start_time: dto.start_time ?? '00:00:00',
       end_time: dto.end_time ?? '23:59:59',
+      registration_open_at: dto.registration_open_at
+        ? new Date(dto.registration_open_at)
+        : null,
       registration_deadline: dto.registration_deadline
         ? new Date(dto.registration_deadline)
         : null,
@@ -590,6 +607,11 @@ export class ActivityService {
     }
     if (dto.status !== undefined) {
       updates.status = dto.status;
+    }
+    if (dto.registration_open_at !== undefined) {
+      updates.registration_open_at = dto.registration_open_at
+        ? new Date(dto.registration_open_at)
+        : null;
     }
     if (dto.registration_deadline !== undefined) {
       updates.registration_deadline = dto.registration_deadline

@@ -14,6 +14,8 @@ import { UserModule } from './user/user.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { OrderModule } from './order/order.module';
 import { SponsorModule } from './sponsor/sponsor.module';
+import { ContactModule } from './contact/contact.module';
+import { NewsModule } from './news/news.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -38,6 +40,8 @@ import { getDatabaseConfig } from './config/database.config';
     AuditLogModule,
     OrderModule,
     SponsorModule,
+    ContactModule,
+    NewsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

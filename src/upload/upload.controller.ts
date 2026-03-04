@@ -35,6 +35,19 @@ export class UploadController {
     return { url };
   }
 
+  @Post('news-image')
+  @UseInterceptors(FileInterceptor('file', multerOptions(5 * 1024 * 1024)))
+  async uploadNewsImage(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ url: string }> {
+    if (!file) throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
+    if (!IMAGE_MIME_TYPES.includes(file.mimetype as any)) {
+      throw new BadRequestException('รองรับเฉพาะรูปภาพ (JPEG, PNG, GIF, WebP)');
+    }
+    const url = await this.uploadService.saveFile(file, 'news');
+    return { url };
+  }
+
   @Post('organizer-image')
   @UseInterceptors(FileInterceptor('file', multerOptions(2 * 1024 * 1024)))
   async uploadOrganizerImage(

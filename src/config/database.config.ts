@@ -16,6 +16,8 @@ import { SponsorRegistration } from '../entities/sponsor.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { Order } from '../entities/order.entity';
 import { AuditLog } from '../entities/audit-log.entity';
+import { ContactMessage } from '../entities/contact-message.entity';
+import { News } from '../entities/news.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -43,6 +45,8 @@ export const getDatabaseConfig = (
     SponsorPackage,
     Order,
     AuditLog,
+    ContactMessage,
+    News,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',

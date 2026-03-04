@@ -26,7 +26,7 @@ export class CheckInController {
   @Post('submit')
   async submit(
     @Body('registration_id') registrationId?: number,
-  ): Promise<{ checked_in_at: string }> {
+  ): Promise<{ checked_in_at: string; registration_no: string }> {
     const id =
       typeof registrationId === 'number' && Number.isFinite(registrationId)
         ? registrationId

@@ -115,6 +115,10 @@ export class UpdateActivityDto {
 
   @IsOptional()
   @IsDateString()
+  registration_open_at?: string;
+
+  @IsOptional()
+  @IsDateString()
   registration_deadline?: string;
 
   @IsOptional()

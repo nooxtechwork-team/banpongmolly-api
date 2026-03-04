@@ -8,6 +8,7 @@ import { Repository, Between } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
+import { CheckInGateway } from './check-in.gateway';
 
 export interface CheckInLookupResult {
   registration_id: number;
@@ -41,6 +42,7 @@ export class CheckInService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(Activity)
     private readonly activityRepository: Repository<Activity>,
+    private readonly checkInGateway: CheckInGateway,
   ) {}
 
   /**
@@ -126,7 +128,9 @@ export class CheckInService {
   /**
    * บันทึกการเช็คอิน (ได้เฉพาะเมื่อ Order เป็น paid แล้วเท่านั้น)
    */
-  async submit(registrationId: number): Promise<{ checked_in_at: string }> {
+  async submit(
+    registrationId: number,
+  ): Promise<{ checked_in_at: string; registration_no: string }> {
     const reg = await this.registrationRepository.findOne({
       where: { id: registrationId },
     });
@@ -151,7 +155,13 @@ export class CheckInService {
     }
     reg.checked_in_at = new Date();
     await this.registrationRepository.save(reg);
-    return { checked_in_at: reg.checked_in_at.toISOString() };
+
+    this.checkInGateway.notifyTicketCheckedIn(reg.registration_no);
+
+    return {
+      checked_in_at: reg.checked_in_at.toISOString(),
+      registration_no: reg.registration_no,
+    };
   }
 
   /**

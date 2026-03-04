@@ -95,7 +95,11 @@ export class OrderService {
       search?: string;
     },
   ): Promise<{
-    items: (Order & { activity_title?: string | null; registration_no?: string | null })[];
+    items: (Order & {
+      activity_title?: string | null;
+      registration_no?: string | null;
+      checked_in_at?: string | null;
+    })[];
     total: number;
   }> {
     const page = options?.page && options.page > 0 ? options.page : 1;
@@ -196,11 +200,15 @@ export class OrderService {
     const enriched = items.map((o) => {
       let title: string | null = null;
       let registrationNo: string | null = null;
+      let checkedInAt: string | null = null;
       if (o.type === OrderType.ACTIVITY_REGISTRATION) {
         const reg = regById.get(o.refer_id);
         if (reg) {
           title = activityById.get(reg.activity_id)?.title ?? null;
           registrationNo = reg.registration_no ?? null;
+          checkedInAt = reg.checked_in_at
+            ? reg.checked_in_at.toISOString()
+            : null;
         }
       } else if (o.type === OrderType.SPONSOR) {
         const sponsor = sponsorById.get(o.refer_id);
@@ -208,7 +216,11 @@ export class OrderService {
           title = activityById.get(sponsor.activity_id)?.title ?? null;
         }
       }
-      return Object.assign(o, { activity_title: title, registration_no: registrationNo ?? undefined });
+      return Object.assign(o, {
+        activity_title: title,
+        registration_no: registrationNo ?? undefined,
+        checked_in_at: checkedInAt,
+      });
     });
 
     return { items: enriched, total };

@@ -60,6 +60,9 @@ export class Activity {
   end_time: string;
 
   @Column({ type: 'datetime', nullable: true })
+  registration_open_at: Date | null;
+
+  @Column({ type: 'datetime', nullable: true })
   registration_deadline: Date | null;
 
   @Column({ type: 'varchar', length: 255 })

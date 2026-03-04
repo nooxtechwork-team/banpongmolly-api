@@ -11,11 +11,12 @@ import { ApplicantsService } from './applicants.service';
 import { ApplicantsController } from './applicants.controller';
 import { CheckInService } from './check-in.service';
 import { CheckInController } from './check-in.controller';
+import { CheckInGateway } from './check-in.gateway';
 import { PaymentsAdminController } from './payments-admin.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Order, ActivityRegistration, Activity, SponsorRegistration])],
-  providers: [OrderService, ApplicantsService, CheckInService],
+  providers: [OrderService, ApplicantsService, CheckInService, CheckInGateway],
   controllers: [
     OrderController,
     MyOrderController,
