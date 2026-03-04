@@ -49,10 +49,8 @@ export const getDatabaseConfig = (
   // Connection pool settings
   extra: {
     connectionLimit: 10,
-    connectTimeout: 60000, // 60 seconds
-    acquireTimeout: 60000, // 60 seconds
-    timeout: 60000, // 60 seconds
-    // Enable keep-alive to prevent connection timeout
+    connectTimeout: 60000, // อันนี้ถูกต้องแล้ว (ใช้ตอนเริ่มสร้าง connection)
+    acquireTimeout: 60000, // อันนี้ถูกต้องแล้ว (ใช้ตอนรอคิวจาก pool)
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
   },
