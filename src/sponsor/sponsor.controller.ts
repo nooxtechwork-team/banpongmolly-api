@@ -96,6 +96,14 @@ export class SponsorAdminController {
     return this.sponsorService.updateAdmin(id, body);
   }
 
+  @Post(':id/feature-homepage')
+  async setFeaturedHomepage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { featured: boolean },
+  ): Promise<Awaited<ReturnType<typeof this.sponsorService.setHomepageFeatured>>> {
+    return this.sponsorService.setHomepageFeatured(id, !!body.featured);
+  }
+
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.sponsorService.deleteAdmin(id);

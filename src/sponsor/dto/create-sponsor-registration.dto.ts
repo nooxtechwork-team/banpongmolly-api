@@ -1,12 +1,31 @@
 import {
+  ArrayMaxSize,
   IsEmail,
   IsNotEmpty,
   IsNumber,
   IsOptional,
-  IsPhoneNumber,
   IsString,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class SponsorSocialDto {
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(32)
+  type: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(100)
+  label: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(512)
+  url: string;
+}
 
 export class CreateSponsorRegistrationDto {
   @IsNotEmpty()
@@ -65,5 +84,14 @@ export class CreateSponsorRegistrationDto {
   @IsString()
   @MaxLength(512)
   payment_slip?: string;
+
+  /**
+   * ช่องทาง social media สูงสุด 2 ช่องทาง
+   */
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => SponsorSocialDto)
+  @ArrayMaxSize(2)
+  socials?: SponsorSocialDto[];
 }
 

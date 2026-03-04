@@ -645,6 +645,14 @@ export class OrderService {
     return this.orderRepository.save(order);
   }
 
+  async findSponsorOrderBySponsorId(
+    sponsorId: number,
+  ): Promise<Order | null> {
+    return this.orderRepository.findOne({
+      where: { type: OrderType.SPONSOR, refer_id: sponsorId },
+    });
+  }
+
   // ADMIN: summary cards for payments page
   async getAdminPaymentsSummary(): Promise<{
     pending: number;

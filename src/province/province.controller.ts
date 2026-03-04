@@ -10,4 +10,9 @@ export class ProvinceController {
   async list(): Promise<Province[]> {
     return this.provinceService.findAll();
   }
+
+  @Get('featured/homepage')
+  async listFeaturedForHomepage() {
+    return this.provinceService.listFeaturedForHomepage();
+  }
 }

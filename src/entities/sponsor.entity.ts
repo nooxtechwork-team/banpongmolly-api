@@ -65,6 +65,19 @@ export class SponsorRegistration {
   @Column({ type: 'varchar', length: 50, nullable: true })
   tax_id: string | null;
 
+  /**
+   * ช่องทาง Social media ที่แสดงบนหน้าแรก
+   * เก็บเป็น JSON string ของ array [{ type, label, url }]
+   */
+  @Column({ type: 'text', nullable: true })
+  social_links_json: string | null;
+
+  /**
+   * ให้แสดงโลโก้/ชื่อบนหน้าแรกหรือไม่ (Admin เป็นคนเลือก)
+   */
+  @Column({ type: 'boolean', default: false })
+  is_featured_homepage: boolean;
+
   /** หลักฐานการโอนเงิน (URL รูป/ไฟล์) */
   @Column({ type: 'varchar', length: 512, nullable: true })
   payment_slip: string | null;

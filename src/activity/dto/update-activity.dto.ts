@@ -74,6 +74,11 @@ export class UpdateActivityDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  province_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   activity_package_id?: number;
 
   @IsOptional()

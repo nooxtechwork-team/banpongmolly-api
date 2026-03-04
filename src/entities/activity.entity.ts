@@ -41,6 +41,12 @@ export class Activity {
   @Column({ type: 'varchar', length: 512, nullable: true })
   detail_infographic_url: string | null;
 
+  /**
+   * จังหวัดที่จัดกิจกรรม (เชื่อมกับตาราง provinces)
+   */
+  @Column({ type: 'int', nullable: true })
+  province_id: number | null;
+
   @Column({ type: 'date' })
   start_date: Date;
 
@@ -86,6 +92,9 @@ export class Activity {
     default: ActivityStatus.DRAFT,
   })
   status: ActivityStatus;
+
+  @Column({ type: 'boolean', default: false })
+  is_featured_homepage: boolean;
 
   @CreateDateColumn()
   created_at: Date;

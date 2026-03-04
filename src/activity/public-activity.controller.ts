@@ -19,17 +19,29 @@ export class PublicActivityController {
     @Query('status') status?: 'open' | 'upcoming' | 'finished',
     @Query('search') search?: string,
     @Query('sort') sort?: 'upcoming' | 'latest' | 'oldest',
+    @Query('province_id') provinceId?: string,
   ): Promise<{ items: Activity[]; total: number } | Activity[]> {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
     const limitNum = limit
       ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
       : 10;
 
+    const province_id =
+      provinceId && !Number.isNaN(parseInt(provinceId, 10))
+        ? parseInt(provinceId, 10)
+        : undefined;
+
     return this.activityService.findPublicPaginated(pageNum, limitNum, {
       status,
       search,
       sort,
+      province_id,
     });
+  }
+
+  @Get('featured/homepage')
+  async listFeaturedForHomepage() {
+    return this.activityService.listFeaturedForHomepage();
   }
 
   @Get('slug/:slug')

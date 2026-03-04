@@ -1,4 +1,11 @@
-import { Body, Controller, Param, ParseIntPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+} from '@nestjs/common';
 import { ActivityService } from '../activity/activity.service';
 import { SponsorService } from './sponsor.service';
 import { CreateSponsorRegistrationDto } from './dto/create-sponsor-registration.dto';
@@ -12,6 +19,11 @@ export class PublicSponsorController {
     private readonly sponsorPackageService: SponsorPackageService,
   ) {}
 
+  @Get('featured/homepage')
+  async listFeaturedForHomepage() {
+    return this.sponsorService.listFeaturedForHomepage();
+  }
+
   @Post('activity/:activityId/register')
   async registerForActivity(
     @Param('activityId', ParseIntPipe) activityId: number,
@@ -21,7 +33,9 @@ export class PublicSponsorController {
     const activity = await this.activityService.findOne(activityId);
 
     // ดึง package จาก id และยืนยันว่า active
-    const pkg = await this.sponsorPackageService.findOne(dto.sponsor_package_id);
+    const pkg = await this.sponsorPackageService.findOne(
+      dto.sponsor_package_id,
+    );
     if (!pkg.is_active) {
       throw new Error('แพ็กเกจนี้ไม่เปิดให้ใช้งานแล้ว');
     }
@@ -40,9 +54,9 @@ export class PublicSponsorController {
       receipt_address: dto.receipt_address ?? null,
       tax_id: dto.tax_id ?? null,
       payment_slip: dto.payment_slip ?? null,
+      socials: dto.socials ?? null,
     });
 
     return result;
   }
 }
-

@@ -105,6 +105,14 @@ export class ActivityController {
     return this.activityService.update(id, dto);
   }
 
+  @Post(':id/feature-homepage')
+  async setFeaturedHomepage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { featured: boolean },
+  ): Promise<Activity> {
+    return this.activityService.setHomepageFeatured(id, !!body.featured);
+  }
+
   @Patch(':id/sponsor-packages')
   async setSponsorPackages(
     @Param('id', ParseIntPipe) id: number,

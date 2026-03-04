@@ -72,6 +72,44 @@ export class ActivityService {
   }
 
   /**
+   * รายการกิจกรรมที่ให้แสดงในส่วน "งานประกวดแนะนำ" บนหน้าแรก
+   */
+  async listFeaturedForHomepage(): Promise<
+    {
+      id: number;
+      slug: string;
+      title: string;
+      cover_image: string | null;
+      start_date: Date;
+      end_date: Date;
+      location_name: string;
+      status: ActivityStatus;
+    }[]
+  > {
+    const qb = this.activityRepository
+      .createQueryBuilder('activity')
+      .where('activity.deleted_at IS NULL')
+      .andWhere('activity.is_featured_homepage = :featured', {
+        featured: true,
+      })
+      .orderBy('activity.start_date', 'ASC')
+      .addOrderBy('activity.created_at', 'DESC');
+
+    const items = await qb.getMany();
+
+    return items.map((a) => ({
+      id: a.id,
+      slug: a.slug,
+      title: a.title,
+      cover_image: a.cover_image,
+      start_date: a.start_date,
+      end_date: a.end_date,
+      location_name: a.location_name,
+      status: a.status,
+    }));
+  }
+
+  /**
    * ใช้คำนวณราคารวมจาก entries ของงานที่ระบุด้วย slug
    */
   async calculateEntriesTotalForSlug(
@@ -236,6 +274,7 @@ export class ActivityService {
       search?: string;
       status?: 'open' | 'upcoming' | 'finished';
       sort?: 'upcoming' | 'latest' | 'oldest';
+      province_id?: number;
     },
   ): Promise<{ items: Activity[]; total: number }> {
     const qb = this.activityRepository
@@ -258,6 +297,13 @@ export class ActivityService {
         status: ActivityStatus.OPEN,
       }).andWhere('activity.start_date >= :today', {
         today: today.toISOString().slice(0, 10),
+      });
+    }
+
+    // Filter ตามจังหวัด
+    if (options?.province_id != null) {
+      qb.andWhere('activity.province_id = :province_id', {
+        province_id: options.province_id,
       });
     }
 
@@ -348,6 +394,18 @@ export class ActivityService {
       throw new NotFoundException('ไม่พบกิจกรรม');
     }
     return event;
+  }
+
+  /**
+   * เปิด/ปิดการแสดงกิจกรรมบนหน้าแรก
+   */
+  async setHomepageFeatured(
+    id: number,
+    featured: boolean,
+  ): Promise<Activity> {
+    const activity = await this.findOne(id);
+    activity.is_featured_homepage = !!featured;
+    return this.activityRepository.save(activity);
   }
 
   /**
@@ -449,6 +507,7 @@ export class ActivityService {
       location_latitude: dto.location_latitude ?? null,
       location_longitude: dto.location_longitude ?? null,
       contact_info: dto.contact_info ?? null,
+      province_id: dto.province_id ?? null,
       activity_package_id: dto.activity_package_id ?? null,
       max_participants: dto.max_participants ?? 0,
       status: dto.status,
@@ -482,6 +541,9 @@ export class ActivityService {
     }
     if (dto.contact_info !== undefined) {
       updates.contact_info = dto.contact_info ?? null;
+    }
+    if (dto.province_id !== undefined) {
+      updates.province_id = dto.province_id ?? null;
     }
     if (dto.activity_package_id !== undefined) {
       updates.activity_package_id = dto.activity_package_id ?? null;
