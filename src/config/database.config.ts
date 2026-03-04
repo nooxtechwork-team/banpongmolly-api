@@ -46,15 +46,4 @@ export const getDatabaseConfig = (
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',
-  // Connection pool settings
-  extra: {
-    connectionLimit: 10,
-    connectTimeout: 60000, // อันนี้ถูกต้องแล้ว (ใช้ตอนเริ่มสร้าง connection)
-    acquireTimeout: 60000, // อันนี้ถูกต้องแล้ว (ใช้ตอนรอคิวจาก pool)
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 0,
-  },
-  // Retry connection on failure
-  retryAttempts: 3,
-  retryDelay: 3000, // 3 seconds
 });
