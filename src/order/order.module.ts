@@ -13,6 +13,7 @@ import { CheckInService } from './check-in.service';
 import { CheckInController } from './check-in.controller';
 import { CheckInGateway } from './check-in.gateway';
 import { PaymentsAdminController } from './payments-admin.controller';
+import { DashboardAdminController } from './dashboard-admin.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Order, ActivityRegistration, Activity, SponsorRegistration])],
@@ -23,6 +24,7 @@ import { PaymentsAdminController } from './payments-admin.controller';
     ApplicantsController,
     CheckInController,
     PaymentsAdminController,
+    DashboardAdminController,
   ],
   exports: [OrderService],
 })

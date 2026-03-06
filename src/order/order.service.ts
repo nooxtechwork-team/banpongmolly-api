@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { Brackets, In, MoreThanOrEqual, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -790,6 +790,108 @@ export class OrderService {
       pending,
       approved_today: approvedToday,
       rejected_today: rejectedToday,
+    };
+  }
+
+  // ADMIN: overview metrics + charts for dashboard page
+  async getAdminDashboardMetrics(): Promise<{
+    kpis: {
+      total_applicants: number;
+      total_revenue: number;
+      pending_payments: number;
+    };
+    applicantsByActivity: { label: string; value: number }[];
+    weeklyRevenue: { label: string; value: number }[];
+  }> {
+    const [totalApplicants, revenueAgg, pendingPayments] = await Promise.all([
+      this.registrationRepository.count(),
+      this.orderRepository
+        .createQueryBuilder('order')
+        .select('SUM(order.total_amount)', 'total')
+        .where('order.status = :status', { status: OrderStatus.PAID })
+        .getRawOne<{ total: string | null }>(),
+      this.orderRepository.count({
+        where: { status: OrderStatus.PENDING },
+      }),
+    ]);
+
+    const totalRevenue = revenueAgg?.total ? Number(revenueAgg.total) : 0;
+
+    // Top activities by number of registrations (limit 6)
+    const activityRows = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(Activity, 'act', 'act.id = reg.activity_id')
+      .select('act.title', 'label')
+      .addSelect('COUNT(reg.id)', 'value')
+      .groupBy('act.id')
+      .orderBy('value', 'DESC')
+      .limit(6)
+      .getRawMany<{ label: string; value: string }>();
+
+    const applicantsByActivity = activityRows.map((r) => ({
+      label: r.label,
+      value: Number(r.value) || 0,
+    }));
+
+    // Revenue for last 7 days (including today)
+    const now = new Date();
+    const start = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 6,
+    );
+
+    const recentPaidOrders = await this.orderRepository.find({
+      where: {
+        status: OrderStatus.PAID,
+        created_at: MoreThanOrEqual(start),
+      },
+      order: { created_at: 'ASC' },
+    });
+
+    const dayKeys: string[] = [];
+    const revenueByDay = new Map<string, number>();
+    for (let i = 0; i < 7; i += 1) {
+      const d = new Date(
+        start.getFullYear(),
+        start.getMonth(),
+        start.getDate() + i,
+      );
+      const key = d.toISOString().slice(0, 10);
+      dayKeys.push(key);
+      revenueByDay.set(key, 0);
+    }
+
+    for (const order of recentPaidOrders) {
+      const key = order.created_at.toISOString().slice(0, 10);
+      if (!revenueByDay.has(key)) continue;
+      revenueByDay.set(
+        key,
+        (revenueByDay.get(key) || 0) + Number(order.total_amount),
+      );
+    }
+
+    const formatter = new Intl.DateTimeFormat('th-TH', {
+      day: '2-digit',
+      month: 'short',
+    });
+
+    const weeklyRevenue = dayKeys.map((key) => {
+      const date = new Date(key);
+      return {
+        label: formatter.format(date),
+        value: revenueByDay.get(key) || 0,
+      };
+    });
+
+    return {
+      kpis: {
+        total_applicants: totalApplicants,
+        total_revenue: totalRevenue,
+        pending_payments: pendingPayments,
+      },
+      applicantsByActivity,
+      weeklyRevenue,
     };
   }
 }
