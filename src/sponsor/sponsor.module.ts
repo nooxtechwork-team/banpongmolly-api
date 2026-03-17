@@ -11,12 +11,14 @@ import { SponsorPackageService } from './sponsor-package.service';
 import { SponsorPackageAdminController } from './sponsor-package.controller';
 import { PublicSponsorController } from './public-sponsor.controller';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { UserActionLogModule } from '../user-action-log/user-action-log.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([SponsorRegistration, Activity, SponsorPackage]),
     ActivityModule,
     OrderModule,
+    UserActionLogModule,
   ],
   providers: [SponsorService, SponsorPackageService, AdminGuard],
   controllers: [SponsorAdminController, SponsorPackageAdminController, PublicSponsorController],

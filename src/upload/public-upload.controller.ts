@@ -25,12 +25,9 @@ export class PublicUploadController {
   ): Promise<{ url: string }> {
     if (!file) throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
     if (!IMAGE_MIME_TYPES.includes(file.mimetype as any)) {
-      throw new BadRequestException(
-        'รองรับเฉพาะรูปภาพ (JPEG, PNG, GIF, WebP)',
-      );
+      throw new BadRequestException('รองรับเฉพาะรูปภาพ (JPEG, PNG, GIF, WebP)');
     }
     const url = await this.uploadService.saveFile(file, 'payment-slips');
     return { url };
   }
 }
-

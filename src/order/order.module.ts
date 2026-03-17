@@ -14,9 +14,18 @@ import { CheckInController } from './check-in.controller';
 import { CheckInGateway } from './check-in.gateway';
 import { PaymentsAdminController } from './payments-admin.controller';
 import { DashboardAdminController } from './dashboard-admin.controller';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Order, ActivityRegistration, Activity, SponsorRegistration])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Order,
+      ActivityRegistration,
+      Activity,
+      SponsorRegistration,
+    ]),
+    AuditLogModule,
+  ],
   providers: [OrderService, ApplicantsService, CheckInService, CheckInGateway],
   controllers: [
     OrderController,
@@ -29,4 +38,3 @@ import { DashboardAdminController } from './dashboard-admin.controller';
   exports: [OrderService],
 })
 export class OrderModule {}
-

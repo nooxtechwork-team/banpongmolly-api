@@ -5,6 +5,7 @@ import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { Activity } from '../entities/activity.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { OrderService } from '../order/order.service';
+import { UserActionLogService } from '../user-action-log/user-action-log.service';
 
 export interface SponsorListItem {
   id: number;
@@ -33,6 +34,7 @@ export class SponsorService {
     @InjectRepository(Activity)
     private readonly activityRepo: Repository<Activity>,
     private readonly orderService: OrderService,
+    private readonly userActionLogService: UserActionLogService,
   ) {}
 
   async listAdmin(
@@ -233,22 +235,25 @@ export class SponsorService {
     await this.sponsorRepo.remove(sponsor);
   }
 
-  async createFromSubmission(payload: {
-    activity_id: number;
-    tier: SponsorTier;
-    amount: number;
-    contact_name: string;
-    contact_phone: string;
-    contact_email?: string | null;
-    contact_line_id?: string | null;
-    brand_display_name: string;
-    logo_url?: string | null;
-    receipt_name?: string | null;
-    receipt_address?: string | null;
-    tax_id?: string | null;
-    payment_slip?: string | null;
-    socials?: { type: string; label: string; url: string }[] | null;
-  }): Promise<{
+  async createFromSubmission(
+    payload: {
+      activity_id: number;
+      tier: SponsorTier;
+      amount: number;
+      contact_name: string;
+      contact_phone: string;
+      contact_email?: string | null;
+      contact_line_id?: string | null;
+      brand_display_name: string;
+      logo_url?: string | null;
+      receipt_name?: string | null;
+      receipt_address?: string | null;
+      tax_id?: string | null;
+      payment_slip?: string | null;
+      socials?: { type: string; label: string; url: string }[] | null;
+    },
+    userId?: number | null,
+  ): Promise<{
     sponsor: SponsorRegistration;
     order: {
       id: number;
@@ -260,6 +265,7 @@ export class SponsorService {
     const sponsor = this.sponsorRepo.create({
       sponsor_no: generateReferenceNo('SP'),
       activity_id: payload.activity_id,
+      user_id: userId ?? null,
       tier: payload.tier,
       amount: payload.amount,
       contact_name: payload.contact_name,
@@ -287,6 +293,24 @@ export class SponsorService {
       phone: saved.contact_phone,
       email: saved.contact_email,
       totalAmount: Number(saved.amount),
+      userId: userId ?? null,
+    });
+
+    await this.userActionLogService.create({
+      action: 'sponsor_apply',
+      entity_type: 'sponsor_registration',
+      user_id: userId ?? null,
+      entity_id: saved.id,
+      email: saved.contact_email ?? null,
+      phone: saved.contact_phone ?? null,
+      metadata: {
+        activity_id: saved.activity_id,
+        sponsor_no: saved.sponsor_no,
+        amount: Number(saved.amount),
+        tier: saved.tier,
+        order_id: order.id,
+        order_no: order.order_no,
+      },
     });
 
     return {

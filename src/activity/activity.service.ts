@@ -21,6 +21,7 @@ import {
 } from './activity-reward.service';
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
+import { UserActionLogService } from '../user-action-log/user-action-log.service';
 
 const UPLOAD_SUBDIR = 'activities' as const;
 
@@ -62,6 +63,7 @@ export class ActivityService {
     private readonly activityRewardService: ActivityRewardService,
     private readonly activityTagService: ActivityTagService,
     private readonly orderService: OrderService,
+    private readonly userActionLogService: UserActionLogService,
   ) {}
 
   async findAll(): Promise<Activity[]> {
@@ -168,6 +170,7 @@ export class ActivityService {
       entries: { package_id: number; quantity: number }[];
       payment_slip?: string;
     },
+    userId?: number | null,
   ): Promise<{
     registration: ActivityRegistration;
     order: {
@@ -203,6 +206,7 @@ export class ActivityService {
     const entity = this.registrationRepository.create({
       registration_no: generateReferenceNo('AR'),
       activity_id: activity.id,
+      user_id: userId ?? null,
       applicant_name: payload.applicant_name,
       farm_name: payload.farm_name ?? null,
       address: payload.address ?? null,
@@ -231,6 +235,24 @@ export class ActivityService {
       phone: saved.phone,
       email: saved.email,
       totalAmount: total_amount,
+      userId: userId ?? null,
+    });
+
+    await this.userActionLogService.create({
+      action: 'activity_apply',
+      entity_type: 'activity_registration',
+      user_id: userId ?? null,
+      entity_id: saved.id,
+      email: saved.email ?? null,
+      phone: saved.phone ?? null,
+      metadata: {
+        activity_id: activity.id,
+        activity_slug: activity.slug,
+        registration_no: saved.registration_no,
+        total_amount,
+        order_id: order.id,
+        order_no: order.order_no,
+      },
     });
 
     return {

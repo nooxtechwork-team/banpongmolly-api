@@ -18,6 +18,8 @@ import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResponseUtil } from '../common/utils/response.util';
 import { OAuth2Client } from 'google-auth-library';
 import { MailService } from '../mail/mail.service';
+import { LoginLogService } from '../login-log/login-log.service';
+import type { LoginProvider, LoginStatus } from '../entities/login-log.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,6 +35,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private mailService: MailService,
+    private loginLogService: LoginLogService,
   ) {
     const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
     if (googleClientId) {
@@ -156,7 +159,7 @@ export class AuthService {
     );
   }
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, context?: { ip?: string | null; userAgent?: string | null }) {
     const { email, password, remember_me = false } = loginDto;
 
     const user = await this.userRepository.findOne({
@@ -165,6 +168,14 @@ export class AuthService {
     });
 
     if (!user) {
+      await this.logLogin({
+        provider: 'local',
+        status: 'failed',
+        email,
+        reason: 'USER_NOT_FOUND',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
@@ -174,6 +185,15 @@ export class AuthService {
     );
 
     if (!localAuth || !localAuth.password_hash) {
+      await this.logLogin({
+        provider: 'local',
+        status: 'failed',
+        userId: user.id,
+        email: user.email,
+        reason: 'NO_LOCAL_AUTH',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
@@ -184,6 +204,15 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
+      await this.logLogin({
+        provider: 'local',
+        status: 'failed',
+        userId: user.id,
+        email: user.email,
+        reason: 'INVALID_PASSWORD',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
@@ -199,12 +228,30 @@ export class AuthService {
         user.email,
         verificationToken,
       );
+      await this.logLogin({
+        provider: 'local',
+        status: 'failed',
+        userId: user.id,
+        email: user.email,
+        reason: 'EMAIL_NOT_VERIFIED',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException(
         'กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ เราได้ส่งลิงก์ยืนยันไปยังอีเมลของคุณอีกครั้งแล้ว',
       );
     }
 
     const tokens = await this.generateTokens(user, remember_me);
+
+    await this.logLogin({
+      provider: 'local',
+      status: 'success',
+      userId: user.id,
+      email: user.email,
+      ip: context?.ip ?? null,
+      userAgent: context?.userAgent ?? null,
+    });
 
     return ResponseUtil.success(
       {
@@ -268,7 +315,10 @@ export class AuthService {
   /**
    * LINE Login: แลก code → token → id_token แล้วผูก/ล็อกอิน user
    */
-  async lineLoginWithCode(code: string) {
+  async lineLoginWithCode(
+    code: string,
+    context?: { ip?: string | null; userAgent?: string | null },
+  ) {
     const channelId = this.configService.get<string>('LINE_CHANNEL_ID');
     const channelSecret = this.configService.get<string>('LINE_CHANNEL_SECRET');
     const callbackUrl = this.configService.get<string>('LINE_CALLBACK_URL');
@@ -294,6 +344,13 @@ export class AuthService {
     });
 
     if (!tokenRes.ok) {
+      await this.logLogin({
+        provider: 'line',
+        status: 'failed',
+        reason: 'LINE_TOKEN_EXCHANGE_FAILED',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('ไม่สามารถเข้าสู่ระบบด้วย LINE ได้');
     }
 
@@ -304,6 +361,13 @@ export class AuthService {
 
     const idToken = tokenData.id_token;
     if (!idToken) {
+      await this.logLogin({
+        provider: 'line',
+        status: 'failed',
+        reason: 'LINE_NO_ID_TOKEN',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('ไม่พบ id_token จาก LINE');
     }
 
@@ -315,6 +379,13 @@ export class AuthService {
     } | null;
 
     if (!payload || !payload.sub) {
+      await this.logLogin({
+        provider: 'line',
+        status: 'failed',
+        reason: 'LINE_PAYLOAD_INVALID',
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('โทเคน LINE ไม่ถูกต้อง');
     }
 
@@ -325,6 +396,15 @@ export class AuthService {
       picture: payload.picture,
     });
     const tokens = await this.generateTokens(user);
+
+    await this.logLogin({
+      provider: 'line',
+      status: 'success',
+      userId: user.id,
+      email: user.email,
+      ip: context?.ip ?? null,
+      userAgent: context?.userAgent ?? null,
+    });
 
     return {
       user,
@@ -398,7 +478,10 @@ export class AuthService {
    * Login ด้วย idToken จาก Google (ฝั่ง frontend ส่งมา)
    * ใช้ logic เดียวกับ googleLoginFromProfile: เช็ค provider_id ก่อน (login) ไม่เจอค่อย insert (สมัคร)
    */
-  async googleLogin(idToken: string) {
+  async googleLogin(
+    idToken: string,
+    context?: { ip?: string | null; userAgent?: string | null },
+  ) {
     if (!this.googleClient) {
       throw new BadRequestException('ยังไม่ได้ตั้งค่า Google OAuth');
     }
@@ -411,6 +494,13 @@ export class AuthService {
 
       const payload = ticket.getPayload();
       if (!payload) {
+        await this.logLogin({
+          provider: 'google',
+          status: 'failed',
+          reason: 'GOOGLE_PAYLOAD_EMPTY',
+          ip: context?.ip ?? null,
+          userAgent: context?.userAgent ?? null,
+        });
         throw new UnauthorizedException('โทเคน Google ไม่ถูกต้อง');
       }
 
@@ -429,6 +519,15 @@ export class AuthService {
 
       const user = await this.googleLoginFromProfile(profile);
       const tokens = await this.generateTokens(user);
+
+      await this.logLogin({
+        provider: 'google',
+        status: 'success',
+        userId: user.id,
+        email: user.email,
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
 
       return ResponseUtil.success(
         {
@@ -451,6 +550,17 @@ export class AuthService {
       ) {
         throw error;
       }
+      await this.logLogin({
+        provider: 'google',
+        status: 'failed',
+        reason: 'GOOGLE_LOGIN_ERROR',
+        metadata: {
+          message:
+            error instanceof Error ? error.message : 'Unknown Google login error',
+        },
+        ip: context?.ip ?? null,
+        userAgent: context?.userAgent ?? null,
+      });
       throw new UnauthorizedException('โทเคน Google ไม่ถูกต้อง');
     }
   }
@@ -730,5 +840,31 @@ export class AuthService {
       Math.random().toString(36).substring(2, 15) +
       Date.now().toString(36)
     );
+  }
+
+  private async logLogin(input: {
+    provider: LoginProvider;
+    status: LoginStatus;
+    userId?: number;
+    email?: string;
+    reason?: string;
+    ip?: string | null;
+    userAgent?: string | null;
+    metadata?: Record<string, unknown>;
+  }) {
+    try {
+      await this.loginLogService.create({
+        provider: input.provider,
+        status: input.status,
+        user_id: input.userId ?? null,
+        email: input.email ?? null,
+        reason: input.reason ?? null,
+        ip: input.ip ?? null,
+        user_agent: input.userAgent ?? null,
+        metadata: input.metadata ?? null,
+      });
+    } catch {
+      // don't break auth flow if logging fails
+    }
   }
 }

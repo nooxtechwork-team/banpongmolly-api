@@ -17,4 +17,3 @@ export class OrderController {
     return this.orderRepository.findOneOrFail({ where: { id } });
   }
 }
-

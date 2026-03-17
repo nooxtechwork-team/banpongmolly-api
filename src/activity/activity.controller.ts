@@ -24,6 +24,7 @@ import { UpdateActivityDto } from './dto/update-activity.dto';
 import { UpsertActivityRewardsDto } from './dto/upsert-activity-rewards.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { Audit } from '../common/decorators/audit.decorator';
 import { Activity } from '../entities/activity.entity';
 
 @Controller('admin/activities')
@@ -84,11 +85,21 @@ export class ActivityController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Audit({
+    action: 'create',
+    entity_type: 'activity',
+    entityIdSource: 'result:id',
+  })
   async create(@Body() dto: CreateActivityDto): Promise<Activity> {
     return this.activityService.create(dto);
   }
 
   @Patch(':id/rewards')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity',
+    entityIdSource: 'param:id',
+  })
   async setRewards(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpsertActivityRewardsDto,
@@ -98,6 +109,11 @@ export class ActivityController {
   }
 
   @Patch(':id')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity',
+    entityIdSource: 'param:id',
+  })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateActivityDto,
@@ -106,6 +122,11 @@ export class ActivityController {
   }
 
   @Post(':id/feature-homepage')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity',
+    entityIdSource: 'param:id',
+  })
   async setFeaturedHomepage(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { featured: boolean },
@@ -114,6 +135,11 @@ export class ActivityController {
   }
 
   @Patch(':id/sponsor-packages')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity',
+    entityIdSource: 'param:id',
+  })
   async setSponsorPackages(
     @Param('id', ParseIntPipe) id: number,
     @Body()
@@ -130,6 +156,11 @@ export class ActivityController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit({
+    action: 'delete',
+    entity_type: 'activity',
+    entityIdSource: 'param:id',
+  })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.activityService.softDelete(id);
   }

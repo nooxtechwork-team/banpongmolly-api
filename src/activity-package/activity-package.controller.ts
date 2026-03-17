@@ -21,6 +21,7 @@ import { UpdateActivityPackageDto } from './dto/update-activity-package.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { ActivityPackage } from '../entities/activity-package.entity';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/activity-packages')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -41,6 +42,11 @@ export class ActivityPackageController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Audit({
+    action: 'create',
+    entity_type: 'activity_package',
+    entityIdSource: 'result:id',
+  })
   async create(
     @Body() dto: CreateActivityPackageDto,
   ): Promise<ActivityPackage> {
@@ -48,6 +54,11 @@ export class ActivityPackageController {
   }
 
   @Patch(':id')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity_package',
+    entityIdSource: 'param:id',
+  })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateActivityPackageDto,
@@ -57,6 +68,11 @@ export class ActivityPackageController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit({
+    action: 'delete',
+    entity_type: 'activity_package',
+    entityIdSource: 'param:id',
+  })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.activityPackageService.softDelete(id);
   }

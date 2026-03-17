@@ -3,6 +3,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { AccessLogInterceptor } from './common/interceptors/access-log.interceptor';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { Reflector } from '@nestjs/core';
+import { AuditLogService } from './audit-log/audit-log.service';
+import { AccessLogService } from './access-log/access-log.service';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 
@@ -32,8 +37,15 @@ async function bootstrap() {
   // Global exception filter
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  // Global response interceptor
-  app.useGlobalInterceptors(new ResponseInterceptor());
+  // Global interceptors: access log + audit (สำหรับ endpoint ที่ติด @Audit) + standard response wrapper
+  const reflector = app.get(Reflector);
+  const auditLogService = app.get(AuditLogService);
+  const accessLogService = app.get(AccessLogService);
+  app.useGlobalInterceptors(
+    new AccessLogInterceptor(accessLogService),
+    new AuditInterceptor(reflector, auditLogService),
+    new ResponseInterceptor(),
+  );
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);

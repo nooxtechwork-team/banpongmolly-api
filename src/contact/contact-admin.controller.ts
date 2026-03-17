@@ -21,4 +21,3 @@ export class ContactAdminController {
     return this.contactService.findPaginated(pageNum, limitNum);
   }
 }
-

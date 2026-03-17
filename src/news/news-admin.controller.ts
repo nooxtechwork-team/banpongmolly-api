@@ -17,6 +17,7 @@ import { NewsService } from './news.service';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { UpdateNewsDto } from './dto/update-news.dto';
 import { NewsCategory } from '../entities/news.entity';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/news')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -62,16 +63,31 @@ export class NewsAdminController {
   }
 
   @Post()
+  @Audit({
+    action: 'create',
+    entity_type: 'news',
+    entityIdSource: 'result:id',
+  })
   async create(@Body() dto: CreateNewsDto) {
     return this.newsService.create(dto);
   }
 
   @Patch(':id')
+  @Audit({
+    action: 'edit',
+    entity_type: 'news',
+    entityIdSource: 'param:id',
+  })
   async update(@Param('id') id: string, @Body() dto: UpdateNewsDto) {
     return this.newsService.update(Number(id), dto);
   }
 
   @Delete(':id')
+  @Audit({
+    action: 'delete',
+    entity_type: 'news',
+    entityIdSource: 'param:id',
+  })
   async remove(@Param('id') id: string) {
     await this.newsService.remove(Number(id));
     return { success: true, message: 'ลบบทความข่าวเรียบร้อยแล้ว' };

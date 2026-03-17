@@ -16,7 +16,10 @@ export class ApplicantsController {
     @Query('activity_id') activity_id?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
-  ): Promise<{ items: Awaited<ReturnType<ApplicantsService['findPaginated']>>['items']; total: number }> {
+  ): Promise<{
+    items: Awaited<ReturnType<ApplicantsService['findPaginated']>>['items'];
+    total: number;
+  }> {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
     const limitNum = limit
       ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))

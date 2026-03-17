@@ -5,13 +5,32 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 
-export type AuditAction = 'approve' | 'reject' | 'edit';
+export type AuditAction =
+  | 'approve'
+  | 'reject'
+  | 'create'
+  | 'edit'
+  | 'delete'
+  | 'submit';
 export type AuditEntityType =
   | 'payment'
   | 'payment_sponsor'
+  | 'check_in'
   | 'event'
   | 'package'
-  | 'activity_package';
+  | 'user'
+  | 'sponsor'
+  | 'sponsor_package'
+  | 'activity'
+  | 'activity_package'
+  | 'province'
+  | 'organizer'
+  | 'news'
+  | 'banner'
+  | 'banner_category'
+  | 'banner_position'
+  | 'banner_type'
+  | 'banner_status';
 
 @Entity('audit_logs')
 export class AuditLog {

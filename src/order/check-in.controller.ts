@@ -10,6 +10,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CheckInService } from './check-in.service';
+import { Audit } from 'src/common/decorators/audit.decorator';
 
 @Controller('admin/check-in')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -24,6 +25,11 @@ export class CheckInController {
   }
 
   @Post('submit')
+  @Audit({
+    action: 'submit',
+    entity_type: 'check_in',
+    entityIdSource: 'body:registration_id',
+  })
   async submit(
     @Body('registration_id') registrationId?: number,
   ): Promise<{ checked_in_at: string; registration_no: string }> {

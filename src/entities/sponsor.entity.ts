@@ -13,6 +13,9 @@ export class SponsorRegistration {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ type: 'int', nullable: true })
+  user_id: number | null;
+
   /** โค้ดอ้างอิง เช่น SP20260225ABC123 */
   @Column({
     name: 'sponsor_no',

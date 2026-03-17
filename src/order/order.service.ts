@@ -1,12 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, MoreThanOrEqual, Repository } from 'typeorm';
+import { In, MoreThanOrEqual, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { User } from '../entities/user.entity';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class OrderService {
@@ -19,6 +20,7 @@ export class OrderService {
     private readonly activityRepository: Repository<Activity>,
     @InjectRepository(SponsorRegistration)
     private readonly sponsorRepository: Repository<SponsorRegistration>,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createActivityRegistrationOrder(params: {
@@ -27,11 +29,13 @@ export class OrderService {
     phone: string;
     email?: string | null;
     totalAmount: number;
+    userId?: number | null;
   }): Promise<Order> {
     const entity = this.orderRepository.create({
       order_no: generateReferenceNo('ORD'),
       type: OrderType.ACTIVITY_REGISTRATION,
       refer_id: params.registrationId,
+      user_id: params.userId ?? null,
       customer_name: params.applicantName,
       customer_phone: params.phone,
       customer_email: params.email ?? null,
@@ -48,11 +52,13 @@ export class OrderService {
     phone: string;
     email?: string | null;
     totalAmount: number;
+    userId?: number | null;
   }): Promise<Order> {
     const entity = this.orderRepository.create({
       order_no: generateReferenceNo('ORD'),
       type: OrderType.SPONSOR,
       refer_id: params.sponsorId,
+      user_id: params.userId ?? null,
       customer_name: params.contactName,
       customer_phone: params.phone,
       customer_email: params.email ?? null,
@@ -106,22 +112,9 @@ export class OrderService {
     const limitRaw = options?.limit && options.limit > 0 ? options.limit : 10;
     const limit = Math.min(Math.max(1, limitRaw), 100);
 
-    const qb = this.orderRepository.createQueryBuilder('order');
-
-    // เงื่อนไขเจ้าของ order: (email ตรง หรือ ไม่มี email แต่เบอร์ตรง) — ใส่ bracket เพื่อให้ AND status/type ใช้กับทั้งก้อน
-    qb.where(
-      new Brackets((sub) => {
-        sub.where('order.customer_email = :email', {
-          email: user.email.toLowerCase(),
-        });
-        if (user.phone_number) {
-          sub.orWhere(
-            '(order.customer_email IS NULL AND order.customer_phone = :phone)',
-            { phone: user.phone_number },
-          );
-        }
-      }),
-    );
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .where('order.user_id = :userId', { userId: user.id });
 
     if (options?.status) {
       qb.andWhere('order.status = :status', { status: options.status });
@@ -220,6 +213,7 @@ export class OrderService {
         activity_title: title,
         registration_no: registrationNo ?? undefined,
         checked_in_at: checkedInAt,
+        cancel_reason: o.cancel_reason ?? null,
       });
     });
 
@@ -253,16 +247,7 @@ export class OrderService {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
     }
 
-    // ตรวจสอบความเป็นเจ้าของ: ใช้ email เป็นหลัก ถ้าไม่มีให้ใช้เบอร์โทร
-    const emailMatches =
-      order.customer_email &&
-      order.customer_email.toLowerCase() === user.email.toLowerCase();
-    const phoneMatches =
-      !order.customer_email &&
-      !!user.phone_number &&
-      order.customer_phone === user.phone_number;
-
-    if (!emailMatches && !phoneMatches) {
+    if (order.user_id !== user.id) {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
     }
 
@@ -423,6 +408,7 @@ export class OrderService {
       status: OrderStatus;
       total_amount: number;
       created_at: string;
+      cancel_reason: string | null;
     };
     registration: {
       id: number;
@@ -483,6 +469,7 @@ export class OrderService {
         status: order.status,
         total_amount: Number(order.total_amount),
         created_at: new Date(order.created_at).toISOString(),
+        cancel_reason: order.cancel_reason ?? null,
       },
       registration: registration
         ? {
@@ -584,6 +571,7 @@ export class OrderService {
       status: OrderStatus;
       total_amount: number;
       created_at: string;
+      cancel_reason: string | null;
     };
     sponsor: {
       id: number;
@@ -624,6 +612,7 @@ export class OrderService {
         status: order.status,
         total_amount: Number(order.total_amount),
         created_at: new Date(order.created_at).toISOString(),
+        cancel_reason: order.cancel_reason ?? null,
       },
       sponsor: sponsor
         ? {
@@ -646,6 +635,7 @@ export class OrderService {
   async updateStatusAdmin(
     orderId: number,
     status: OrderStatus,
+    cancelReason?: string | null,
   ): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
@@ -654,12 +644,24 @@ export class OrderService {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
     }
     order.status = status;
+    order.cancel_reason =
+      status === OrderStatus.CANCELLED && cancelReason ? cancelReason : null;
+
+    // ถ้าเป็นออเดอร์สปอนเซอร์ และอนุมัติการชำระเงินแล้ว ให้เปิดแสดงบนหน้าแรกอัตโนมัติ
+    if (order.type === OrderType.SPONSOR && status === OrderStatus.PAID) {
+      const sponsor = await this.sponsorRepository.findOne({
+        where: { id: order.refer_id },
+      });
+      if (sponsor && !sponsor.is_featured_homepage) {
+        sponsor.is_featured_homepage = true;
+        await this.sponsorRepository.save(sponsor);
+      }
+    }
+
     return this.orderRepository.save(order);
   }
 
-  async findSponsorOrderBySponsorId(
-    sponsorId: number,
-  ): Promise<Order | null> {
+  async findSponsorOrderBySponsorId(sponsorId: number): Promise<Order | null> {
     return this.orderRepository.findOne({
       where: { type: OrderType.SPONSOR, refer_id: sponsorId },
     });

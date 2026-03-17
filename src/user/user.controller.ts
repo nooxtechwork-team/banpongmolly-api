@@ -16,6 +16,7 @@ import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { User } from '../entities/user.entity';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/users')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -50,6 +51,7 @@ export class UserController {
   }
 
   @Patch(':id')
+  @Audit({ action: 'edit', entity_type: 'user', entityIdSource: 'param:id' })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateUserAdminDto,
@@ -59,6 +61,7 @@ export class UserController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit({ action: 'delete', entity_type: 'user', entityIdSource: 'param:id' })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.userService.softDelete(id);
   }

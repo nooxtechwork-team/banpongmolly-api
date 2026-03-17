@@ -17,6 +17,7 @@ import type { UpsertOrganizerDto } from './organizer.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { Organizer } from '../entities/organizer.entity';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/organizers')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -45,11 +46,21 @@ export class OrganizerController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Audit({
+    action: 'create',
+    entity_type: 'organizer',
+    entityIdSource: 'result:id',
+  })
   async create(@Body() dto: UpsertOrganizerDto): Promise<Organizer> {
     return this.organizerService.create(dto);
   }
 
   @Patch(':id')
+  @Audit({
+    action: 'edit',
+    entity_type: 'organizer',
+    entityIdSource: 'param:id',
+  })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: Partial<UpsertOrganizerDto>,
@@ -59,6 +70,11 @@ export class OrganizerController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit({
+    action: 'delete',
+    entity_type: 'organizer',
+    entityIdSource: 'param:id',
+  })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.organizerService.softDelete(id);
   }

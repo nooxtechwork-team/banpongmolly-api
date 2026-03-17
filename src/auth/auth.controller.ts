@@ -29,6 +29,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { User } from '../entities/user.entity';
 import { ConfigService } from '@nestjs/config';
+import { LoginLogService } from '../login-log/login-log.service';
+import type { LoginProvider, LoginStatus } from '../entities/login-log.entity';
 
 @Controller('auth')
 @UseInterceptors(ResponseInterceptor)
@@ -36,6 +38,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly loginLogService: LoginLogService,
   ) {}
 
   @Post('register')
@@ -58,8 +61,20 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(
+    @Body() loginDto: LoginDto,
+    @Request() req: { ip?: string; headers?: Record<string, unknown> },
+  ) {
+    const ipHeader =
+      (req.headers?.['x-forwarded-for'] as string | undefined) || '';
+    const clientIp = ipHeader.split(',')[0]?.trim() || req.ip || null;
+    const userAgent =
+      (req.headers?.['user-agent'] as string | undefined) || null;
+
+    return this.authService.login(loginDto, {
+      ip: clientIp,
+      userAgent,
+    });
   }
 
   /** เริ่มต้น LINE Login: redirect ไปหน้า LINE */
@@ -98,11 +113,32 @@ export class AuthController {
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
   async googleOAuthCallback(
-    @Request() req: { user: User },
+    @Request()
+    req: { user: User; ip?: string; headers?: Record<string, unknown> },
     @Res() res: Response,
   ) {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
     const tokens = await this.authService.generateTokens(req.user);
+
+    // log login success for Google OAuth redirect flow
+    try {
+      const ipHeader =
+        (req.headers?.['x-forwarded-for'] as string | undefined) || '';
+      const clientIp = ipHeader.split(',')[0]?.trim() || req.ip || null;
+      const userAgent =
+        (req.headers?.['user-agent'] as string | undefined) || null;
+
+      await this.loginLogService.create({
+        provider: 'google' as LoginProvider,
+        status: 'success' as LoginStatus,
+        user_id: req.user.id ?? null,
+        email: req.user.email ?? null,
+        ip: clientIp,
+        user_agent: userAgent,
+      });
+    } catch {
+      // don't break redirect if logging fails
+    }
 
     const params = new URLSearchParams({
       access_token: tokens.access_token,
@@ -115,8 +151,20 @@ export class AuthController {
   /** Login ด้วย idToken (จาก frontend ที่ใช้ Google Identity Services) */
   @Post('google')
   @HttpCode(HttpStatus.OK)
-  async googleLogin(@Body() googleLoginDto: GoogleLoginDto) {
-    return this.authService.googleLogin(googleLoginDto.idToken);
+  async googleLogin(
+    @Body() googleLoginDto: GoogleLoginDto,
+    @Request() req: { ip?: string; headers?: Record<string, unknown> },
+  ) {
+    const ipHeader =
+      (req.headers?.['x-forwarded-for'] as string | undefined) || '';
+    const clientIp = ipHeader.split(',')[0]?.trim() || req.ip || null;
+    const userAgent =
+      (req.headers?.['user-agent'] as string | undefined) || null;
+
+    return this.authService.googleLogin(googleLoginDto.idToken, {
+      ip: clientIp,
+      userAgent,
+    });
   }
 
   @Post('refresh')
@@ -190,6 +238,7 @@ export class AuthController {
     @Query('code') code: string | undefined,
     @Query('state') _state: string | undefined,
     @Res() res: Response,
+    @Request() req: { ip?: string; headers?: Record<string, unknown> },
   ) {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
 
@@ -199,7 +248,16 @@ export class AuthController {
     }
 
     try {
-      const result = await this.authService.lineLoginWithCode(code);
+      const ipHeader =
+        (req.headers?.['x-forwarded-for'] as string | undefined) || '';
+      const clientIp = ipHeader.split(',')[0]?.trim() || req.ip || null;
+      const userAgent =
+        (req.headers?.['user-agent'] as string | undefined) || null;
+
+      const result = await this.authService.lineLoginWithCode(code, {
+        ip: clientIp,
+        userAgent,
+      });
       const params = new URLSearchParams({
         access_token: result.access_token,
         refresh_token: result.refresh_token,

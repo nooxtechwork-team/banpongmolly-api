@@ -16,6 +16,7 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { UploadModule } from '../upload/upload.module';
 import { ActivityPackageModule } from '../activity-package/activity-package.module';
 import { OrderModule } from '../order/order.module';
+import { UserActionLogModule } from '../user-action-log/user-action-log.module';
 
 @Module({
   imports: [
@@ -31,8 +32,14 @@ import { OrderModule } from '../order/order.module';
     UploadModule,
     ActivityPackageModule,
     OrderModule,
+    UserActionLogModule,
   ],
-  providers: [ActivityService, ActivityRewardService, ActivityTagService, AdminGuard],
+  providers: [
+    ActivityService,
+    ActivityRewardService,
+    ActivityTagService,
+    AdminGuard,
+  ],
   controllers: [ActivityController, PublicActivityController],
   exports: [ActivityService],
 })

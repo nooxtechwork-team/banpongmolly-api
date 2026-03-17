@@ -16,6 +16,9 @@ import { OrderModule } from './order/order.module';
 import { SponsorModule } from './sponsor/sponsor.module';
 import { ContactModule } from './contact/contact.module';
 import { NewsModule } from './news/news.module';
+import { AccessLogModule } from './access-log/access-log.module';
+import { LoginLogModule } from './login-log/login-log.module';
+import { UserActionLogModule } from './user-action-log/user-action-log.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -38,6 +41,9 @@ import { getDatabaseConfig } from './config/database.config';
     UploadModule,
     UserModule,
     AuditLogModule,
+    AccessLogModule,
+    LoginLogModule,
+    UserActionLogModule,
     OrderModule,
     SponsorModule,
     ContactModule,

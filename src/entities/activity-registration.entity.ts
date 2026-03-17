@@ -11,6 +11,9 @@ export class ActivityRegistration {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ type: 'int', nullable: true })
+  user_id: number | null;
+
   /** รหัสอ้างอิง (ตัวอักษรผสมตัวเลข) เช่น AR20260225A1B2C3 */
   @Column({
     name: 'registration_no',

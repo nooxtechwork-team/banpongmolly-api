@@ -35,6 +35,9 @@ export class Order {
   @Column({ type: 'int' })
   refer_id: number;
 
+  @Column({ type: 'int', nullable: true })
+  user_id: number | null;
+
   @Column({ type: 'varchar', length: 255 })
   customer_name: string;
 
@@ -53,6 +56,10 @@ export class Order {
     default: OrderStatus.PENDING,
   })
   status: OrderStatus;
+
+  /** เหตุผลการยกเลิกคำสั่งซื้อ (กรณี admin ปฏิเสธการชำระเงิน) */
+  @Column({ type: 'text', nullable: true })
+  cancel_reason: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   payment_ref: string | null;

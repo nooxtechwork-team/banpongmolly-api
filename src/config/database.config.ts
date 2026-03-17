@@ -16,6 +16,9 @@ import { SponsorRegistration } from '../entities/sponsor.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { Order } from '../entities/order.entity';
 import { AuditLog } from '../entities/audit-log.entity';
+import { AccessLog } from '../entities/access-log.entity';
+import { LoginLog } from '../entities/login-log.entity';
+import { UserActionLog } from '../entities/user-action-log.entity';
 import { ContactMessage } from '../entities/contact-message.entity';
 import { News } from '../entities/news.entity';
 
@@ -45,6 +48,9 @@ export const getDatabaseConfig = (
     SponsorPackage,
     Order,
     AuditLog,
+    AccessLog,
+    LoginLog,
+    UserActionLog,
     ContactMessage,
     News,
   ],

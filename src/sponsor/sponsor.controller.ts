@@ -13,6 +13,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { SponsorService } from './sponsor.service';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/sponsors')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -40,7 +41,9 @@ export class SponsorAdminController {
         tier === 'supporter' || tier === 'main' || tier === 'premium'
           ? tier
           : 'all',
-      activity_id: activityId ? parseInt(activityId, 10) || undefined : undefined,
+      activity_id: activityId
+        ? parseInt(activityId, 10) || undefined
+        : undefined,
     });
   }
 
@@ -52,6 +55,11 @@ export class SponsorAdminController {
   }
 
   @Post()
+  @Audit({
+    action: 'create',
+    entity_type: 'sponsor',
+    entityIdSource: 'result:id',
+  })
   async create(
     @Body()
     body: {
@@ -74,6 +82,11 @@ export class SponsorAdminController {
   }
 
   @Patch(':id')
+  @Audit({
+    action: 'edit',
+    entity_type: 'sponsor',
+    entityIdSource: 'param:id',
+  })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body()
@@ -97,16 +110,27 @@ export class SponsorAdminController {
   }
 
   @Post(':id/feature-homepage')
+  @Audit({
+    action: 'edit',
+    entity_type: 'sponsor',
+    entityIdSource: 'param:id',
+  })
   async setFeaturedHomepage(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { featured: boolean },
-  ): Promise<Awaited<ReturnType<typeof this.sponsorService.setHomepageFeatured>>> {
+  ): Promise<
+    Awaited<ReturnType<typeof this.sponsorService.setHomepageFeatured>>
+  > {
     return this.sponsorService.setHomepageFeatured(id, !!body.featured);
   }
 
   @Delete(':id')
+  @Audit({
+    action: 'delete',
+    entity_type: 'sponsor',
+    entityIdSource: 'param:id',
+  })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.sponsorService.deleteAdmin(id);
   }
 }
-

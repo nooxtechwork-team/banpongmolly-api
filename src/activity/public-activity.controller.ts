@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { Activity } from '../entities/activity.entity';
 import {
   ActivityLeafClass,
@@ -7,6 +7,7 @@ import {
 } from './activity.service';
 import { CalculateEntriesDto } from './dto/calculate-entries.dto';
 import { CreateActivityRegistrationDto } from './dto/create-activity-registration.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('activities')
 export class PublicActivityController {
@@ -67,13 +68,16 @@ export class PublicActivityController {
   }
 
   @Post('slug/:slug/register')
+  @UseGuards(JwtAuthGuard)
   async register(
     @Param('slug') slug: string,
     @Body() dto: CreateActivityRegistrationDto,
+    @Request() req: { user: { id: number } },
   ) {
     const result = await this.activityService.createRegistrationForSlug(
       slug,
       dto,
+      req.user.id,
     );
     return result;
   }

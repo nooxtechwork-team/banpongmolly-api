@@ -13,6 +13,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { SponsorPackageService } from './sponsor-package.service';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/sponsor-packages')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -38,15 +39,16 @@ export class SponsorPackageAdminController {
       search: search?.trim() || undefined,
       tier: tier || undefined,
       is_active:
-        isActive === 'true'
-          ? true
-          : isActive === 'false'
-          ? false
-          : undefined,
+        isActive === 'true' ? true : isActive === 'false' ? false : undefined,
     });
   }
 
   @Post()
+  @Audit({
+    action: 'create',
+    entity_type: 'sponsor_package',
+    entityIdSource: 'result:id',
+  })
   async create(
     @Body()
     body: {
@@ -61,6 +63,11 @@ export class SponsorPackageAdminController {
   }
 
   @Patch(':id')
+  @Audit({
+    action: 'edit',
+    entity_type: 'sponsor_package',
+    entityIdSource: 'param:id',
+  })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body()
@@ -77,8 +84,12 @@ export class SponsorPackageAdminController {
   }
 
   @Delete(':id')
+  @Audit({
+    action: 'delete',
+    entity_type: 'sponsor_package',
+    entityIdSource: 'param:id',
+  })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     await this.pkgService.softDelete(id);
   }
 }
-
