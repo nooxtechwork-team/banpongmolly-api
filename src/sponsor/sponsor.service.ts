@@ -15,6 +15,7 @@ export interface SponsorListItem {
   amount: number;
   activity_id: number;
   activity_title: string | null;
+  logo_url: string | null;
   is_featured_homepage: boolean;
   created_at: string;
 }
@@ -95,6 +96,7 @@ export class SponsorService {
       amount: Number(s.amount),
       activity_id: s.activity_id,
       activity_title: activityMap.get(s.activity_id)?.title ?? null,
+      logo_url: s.logo_url ?? null,
       is_featured_homepage: s.is_featured_homepage,
       created_at: s.created_at.toISOString(),
     }));

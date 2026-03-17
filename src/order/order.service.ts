@@ -319,6 +319,7 @@ export class OrderService {
       order_id: number;
       order_no: string;
       applicant_name: string;
+      avatar_url: string | null;
       activity_title: string;
       entries_summary: string;
       total_amount: number;
@@ -333,6 +334,7 @@ export class OrderService {
     const baseQb = this.orderRepository
       .createQueryBuilder('order')
       .innerJoin(ActivityRegistration, 'reg', 'reg.id = order.refer_id')
+      .leftJoin(User, 'user', 'user.id = reg.user_id')
       .innerJoin(Activity, 'act', 'act.id = reg.activity_id')
       .where('order.type = :type', {
         type: OrderType.ACTIVITY_REGISTRATION,
@@ -364,6 +366,7 @@ export class OrderService {
         'order.created_at AS created_at',
         'reg.applicant_name AS applicant_name',
         'reg.entries_json AS entries_json',
+        'user.avatar_url AS avatar_url',
         'act.title AS activity_title',
       ])
       .orderBy('order.created_at', 'DESC')
@@ -389,6 +392,7 @@ export class OrderService {
         order_id: Number(r.order_id),
         order_no: r.order_no as string,
         applicant_name: r.applicant_name as string,
+        avatar_url: (r.avatar_url as string | null) ?? null,
         activity_title: r.activity_title as string,
         entries_summary,
         total_amount: Number(r.total_amount) || 0,
@@ -499,6 +503,7 @@ export class OrderService {
       sponsor_name: string;
       contact_name: string;
       activity_title: string;
+      logo_url: string | null;
       total_amount: number;
       status: OrderStatus;
       created_at: string;
@@ -542,6 +547,7 @@ export class OrderService {
         'order.created_at AS created_at',
         'sponsor.brand_display_name AS sponsor_name',
         'sponsor.contact_name AS contact_name',
+        'sponsor.logo_url AS logo_url',
         'act.title AS activity_title',
       ])
       .orderBy('order.created_at', 'DESC')
@@ -555,6 +561,7 @@ export class OrderService {
       sponsor_name: r.sponsor_name as string,
       contact_name: r.contact_name as string,
       activity_title: r.activity_title as string,
+      logo_url: (r.logo_url as string | null) ?? null,
       total_amount: Number(r.total_amount) || 0,
       status: r.status as OrderStatus,
       created_at: new Date(r.created_at).toISOString(),
