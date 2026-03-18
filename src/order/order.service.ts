@@ -8,6 +8,10 @@ import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { User } from '../entities/user.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { MailService } from '../mail/mail.service';
+import * as puppeteer from 'puppeteer';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class OrderService {
@@ -21,6 +25,7 @@ export class OrderService {
     @InjectRepository(SponsorRegistration)
     private readonly sponsorRepository: Repository<SponsorRegistration>,
     private readonly auditLogService: AuditLogService,
+    private readonly mailService: MailService,
   ) {}
 
   async createActivityRegistrationOrder(params: {
@@ -256,6 +261,7 @@ export class OrderService {
     let activity: Activity | null = null;
     let entries: {
       package_id: number;
+      package_name: string;
       quantity: number;
       unit_price: number;
       line_total: number;
@@ -270,8 +276,9 @@ export class OrderService {
         try {
           const parsed = JSON.parse(registration.entries_json);
           if (Array.isArray(parsed)) {
-            entries = parsed.map((e) => ({
+            entries = parsed.map((e: any) => ({
               package_id: Number(e.package_id),
+              package_name: e.package_name ?? '',
               quantity: Number(e.quantity),
               unit_price: Number(e.unit_price),
               line_total: Number(e.line_total),
@@ -423,6 +430,7 @@ export class OrderService {
     activity: { id: number; title: string } | null;
     entries: {
       package_id: number;
+      package_name: string;
       quantity: number;
       unit_price: number;
       line_total: number;
@@ -439,6 +447,7 @@ export class OrderService {
     let activity: Activity | null = null;
     let entries: {
       package_id: number;
+      package_name: string;
       quantity: number;
       unit_price: number;
       line_total: number;
@@ -453,6 +462,7 @@ export class OrderService {
         if (Array.isArray(parsed)) {
           entries = parsed.map((e: any) => ({
             package_id: Number(e.package_id),
+            package_name: e.package_name,
             quantity: Number(e.quantity),
             unit_price: Number(e.unit_price),
             line_total: Number(e.line_total),
@@ -665,7 +675,176 @@ export class OrderService {
       }
     }
 
-    return this.orderRepository.save(order);
+    const saved = await this.orderRepository.save(order);
+
+    // หลังจากนี้สามารถเรียก sendReceiptEmail(order.id) เพื่อส่งใบเสร็จให้ลูกค้า (ใช้ใน endpoint แยก)
+    return saved;
+  }
+
+  /**
+   * สร้างไฟล์ PDF ใบเสร็จรับเงินจาก HTML template ด้วย Puppeteer
+   */
+  private async generateReceiptPdf(orderId: number): Promise<Uint8Array> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+
+    const isActivity = order.type === OrderType.ACTIVITY_REGISTRATION;
+
+    let activityTitle = '';
+    let customerName = order.customer_name;
+    let lines: { label: string; amount: number }[] = [];
+
+    if (isActivity) {
+      const detail = await this.findAdminPaymentDetail(orderId);
+      activityTitle = detail.activity?.title ?? '';
+      customerName = detail.registration?.applicant_name ?? order.customer_name;
+      lines =
+        detail.entries?.map((e) => ({
+          label: `ค่าสมัครแพ็กเกจ #${e.package_id} ${e.package_name}`,
+          amount: e.line_total,
+        })) ?? [];
+    } else if (order.type === OrderType.SPONSOR) {
+      const detail = await this.findAdminSponsorPaymentDetail(orderId);
+      activityTitle = detail.activity?.title ?? '';
+      customerName = detail.sponsor?.brand_display_name ?? order.customer_name;
+      if (detail.sponsor) {
+        lines = [
+          {
+            label: `สปอนเซอร์แพ็กเกจ ${detail.sponsor.tier}`,
+            amount: detail.sponsor.amount,
+          },
+        ];
+      }
+    }
+
+    const formatAmount = (n: number) =>
+      Number(n || 0).toLocaleString('th-TH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+    // รองรับทั้งตอนรันจาก dist และจาก src (dev mode)
+    let templatePath = path.join(__dirname, 'templates', 'receipt.html');
+    if (!fs.existsSync(templatePath)) {
+      templatePath = path.join(
+        process.cwd(),
+        'src',
+        'order',
+        'templates',
+        'receipt.html',
+      );
+    }
+    let html = fs.readFileSync(templatePath, 'utf8');
+
+    const linesHtml = lines.length
+      ? lines
+          .map(
+            (l) =>
+              `<tr><td>${l.label}</td><td style="text-align:right;">${formatAmount(
+                l.amount,
+              )}</td></tr>`,
+          )
+          .join('')
+      : `<tr><td>ยอดชำระทั้งหมด</td><td style="text-align:right;">${formatAmount(
+          Number(order.total_amount),
+        )}</td></tr>`;
+
+    html = html
+      .replace(/{{order_no}}/g, order.order_no)
+      .replace(
+        /{{date}}/g,
+        order.created_at.toLocaleString('th-TH', {
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      )
+      .replace(/{{customer_name}}/g, customerName)
+      .replace(/{{activity_title}}/g, activityTitle || '')
+      .replace(/{{total_amount}}/g, formatAmount(Number(order.total_amount)))
+      .replace(/{{lines}}/g, linesHtml);
+
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
+      });
+      return pdfBuffer;
+    } finally {
+      await browser.close();
+    }
+  }
+
+  /**
+   * ส่งอีเมลใบเสร็จพร้อมแนบไฟล์ PDF ไปยังอีเมลของผู้ที่ทำรายการสั่งซื้อ
+   */
+  async sendReceiptEmail(orderId: number): Promise<void> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+    if (!order.customer_email) {
+      // ไม่มีอีเมลให้ส่ง ข้าม
+      return;
+    }
+
+    const pdfUint8 = await this.generateReceiptPdf(orderId);
+    const pdfBuffer = Buffer.from(pdfUint8);
+
+    const formattedTotal = Number(order.total_amount).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    // โหลด HTML email template (รองรับทั้ง dist และ src)
+    let emailTemplatePath = path.join(
+      __dirname,
+      'templates',
+      'receipt-email.html',
+    );
+    if (!fs.existsSync(emailTemplatePath)) {
+      emailTemplatePath = path.join(
+        process.cwd(),
+        'src',
+        'order',
+        'templates',
+        'receipt-email.html',
+      );
+    }
+    let emailHtml = fs.readFileSync(emailTemplatePath, 'utf8');
+    emailHtml = emailHtml
+      .replace(/{{order_no}}/g, order.order_no)
+      .replace(/{{total_amount}}/g, formattedTotal);
+
+    // ใช้ MailService โดยแนบไฟล์ PDF เป็นใบเสร็จ
+    // ถ้า Mail ไม่ได้ config ไว้ MailService จะ log warning และไม่ throw
+    await this.mailService.sendRawEmail({
+      to: order.customer_email,
+      subject: `ใบเสร็จรับเงินสำหรับคำสั่งซื้อ ${order.order_no}`,
+      text: `แนบใบเสร็จรับเงินสำหรับคำสั่งซื้อหมายเลข ${order.order_no} ยอดชำระ ${formattedTotal} บาท`,
+      html: emailHtml,
+      attachments: [
+        {
+          filename: `receipt-${order.order_no}.pdf`,
+          content: pdfBuffer,
+        },
+      ],
+    });
   }
 
   async findSponsorOrderBySponsorId(sponsorId: number): Promise<Order | null> {

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Receipt Email</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          sans-serif;
+        background-color: #f5f5f5;
+        margin: 0;
+        padding: 24px 0;
+      }
+      .outer {
+        max-width: 640px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+        border: 1px solid #e5e7eb;
+      }
+      .hero {
+        position: relative;
+        padding: 20px 24px 18px;
+        background: linear-gradient(135deg, #16a34a, #22c55e);
+        color: #ecfdf3;
+      }
+      .hero-top {
+        font-size: 12px;
+        opacity: 0.9;
+        margin-bottom: 8px;
+      }
+      .hero-title {
+        font-size: 18px;
+        font-weight: 800;
+        margin: 4px 0 8px;
+      }
+      .hero-sub {
+        font-size: 13px;
+        max-width: 360px;
+      }
+      .hero-order {
+        position: absolute;
+        right: 24px;
+        top: 20px;
+        text-align: right;
+        font-size: 11px;
+      }
+      .hero-order-label {
+        opacity: 0.9;
+      }
+      .hero-order-no {
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .section {
+        padding: 18px 24px 8px;
+      }
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #374151;
+        margin-bottom: 10px;
+      }
+      .total-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 0 10px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      .total-label {
+        font-size: 13px;
+        color: #4b5563;
+      }
+      .total-amount {
+        font-size: 20px;
+        font-weight: 800;
+        color: #16a34a;
+      }
+      .summary-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+        font-size: 13px;
+        color: #4b5563;
+      }
+      .summary-table td {
+        padding: 4px 0;
+      }
+      .summary-label {
+        width: 60%;
+      }
+      .summary-value {
+        width: 40%;
+        text-align: right;
+      }
+      .info {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 10px;
+      }
+      .footer {
+        padding: 14px 24px 18px;
+        background-color: #111827;
+        color: #9ca3af;
+        font-size: 11px;
+      }
+      .footer-brand {
+        font-size: 12px;
+        font-weight: 600;
+        color: #f9fafb;
+        margin-bottom: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="outer">
+      <div class="hero">
+        <div class="hero-top">ใบเสร็จรับเงิน / ยืนยันการชำระเงิน</div>
+        <div class="hero-title">หวังว่าคุณจะมีความสุขกับประสบการณ์ในงานนี้!</div>
+        <div class="hero-sub">
+          ใบเสร็จนี้ยืนยันว่าระบบได้รับยอดชำระสำหรับคำสั่งซื้อของคุณเรียบร้อยแล้ว
+          สามารถดาวน์โหลดใบเสร็จฉบับเต็มจากไฟล์แนบได้ทุกเวลา
+        </div>
+        <div class="hero-order">
+          <div class="hero-order-label">รหัสคำสั่งซื้อ</div>
+          <div class="hero-order-no">#{{order_no}}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">สรุปยอดชำระ</div>
+        <div class="total-row">
+          <div class="total-label">ยอดชำระรวมทั้งหมด</div>
+          <div class="total-amount">{{total_amount}} ฿</div>
+        </div>
+        <table class="summary-table">
+          <tr>
+            <td class="summary-label">ยอดค่าสมัครและบริการ</td>
+            <td class="summary-value">{{total_amount}} ฿</td>
+          </tr>
+          <tr>
+            <td class="summary-label">ส่วนลด / โปรโมชั่น</td>
+            <td class="summary-value">0.00 ฿</td>
+          </tr>
+          <tr>
+            <td class="summary-label">ยอดที่ต้องชำระสุทธิ</td>
+            <td class="summary-value">{{total_amount}} ฿</td>
+          </tr>
+        </table>
+        <div class="info">
+          ใบเสร็จฉบับนี้ออกให้กับคำสั่งซื้อหมายเลข {{order_no}} และอาจใช้สำหรับอ้างอิงการเข้าร่วมกิจกรรมได้ตามที่ผู้จัดงานกำหนด
+        </div>
+      </div>
+
+      <div class="section" style="padding-bottom: 18px;">
+        <div class="section-title">หมายเหตุ</div>
+        <div class="info">
+          โปรดเก็บอีเมลฉบับนี้และไฟล์ใบเสร็จ PDF ที่แนบไว้เป็นหลักฐานการชำระเงิน
+          หากตรวจสอบพบความผิดปกติของยอดหรือรายการชำระ สามารถติดต่อทีมงานได้ทันที
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="footer-brand">Molly Fish Event</div>
+        <div>อีเมลฉบับนี้ถูกส่งจากระบบอัตโนมัติ กรุณาอย่าตอบกลับ</div>
+        <div>
+          หากมีคำถามเพิ่มเติม สามารถติดต่อทีมงานผ่านหน้าติดต่อเราบนเว็บไซต์ได้ทุกเวลา
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+

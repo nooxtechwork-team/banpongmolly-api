@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Receipt</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          sans-serif;
+        font-size: 12px;
+        color: #111827;
+        padding: 0;
+        margin: 0;
+        background-color: #f3f4f6;
+      }
+      .page {
+        width: 100%;
+        max-width: 800px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
+      }
+      .header {
+        padding: 20px 28px 16px;
+        border-bottom: 3px solid #e5e7eb;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+      }
+      .brand {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        color: #f97316; /* primary amber/orange */
+      }
+      .brand span {
+        color: #facc15; /* golden accent */
+      }
+      .invoice-banner {
+        margin: 0 28px;
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: linear-gradient(90deg, #facc15, #f97316);
+        border-radius: 4px;
+        font-size: 12px;
+        color: #111827;
+      }
+      .invoice-title {
+        font-weight: 700;
+      }
+      .section {
+        margin: 16px 28px 0;
+        font-size: 11px;
+      }
+      .section-box {
+        border: 1px solid #e5e7eb;
+        border-radius: 2px;
+        padding: 10px 12px;
+        background-color: #ffffff;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .col {
+        flex: 1;
+      }
+      .label {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .muted {
+        color: #6b7280;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+      th,
+      td {
+        border: 1px solid #d1d5db;
+        padding: 6px 8px;
+        font-size: 11px;
+      }
+      th {
+        background: #f3f4f6;
+        text-align: left;
+      }
+      .total-table {
+        width: 260px;
+        margin-left: auto;
+        margin-top: 8px;
+      }
+      .total-table td {
+        border: none;
+        padding: 3px 0;
+      }
+      .total-label {
+        text-align: right;
+        color: #4b5563;
+      }
+      .total-value {
+        width: 120px;
+        text-align: right;
+      }
+      .total-strong {
+        font-weight: 700;
+        color: #f97316;
+      }
+      .footer {
+        margin: 22px 28px 14px;
+        font-size: 10px;
+        text-align: center;
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div class="brand"><span>MOLLY</span>EVENT</div>
+        <div class="company-info">
+          บริษัท มอลลี่ อีเวนต์ จำกัด<br />
+          123/45 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพฯ 10000<br />
+          โทร: 02-000-0000
+        </div>
+      </div>
+
+      <div class="invoice-banner">
+        <span class="invoice-title">ใบเสร็จรับเงิน / Receipt #{{order_no}}</span>
+      </div>
+
+      <div class="section">
+        <div class="section-box">
+          <div class="row">
+            <div class="col">
+              <div class="label">รายละเอียดใบเสร็จ</div>
+              <div>เลขที่คำสั่งซื้อ: {{order_no}}</div>
+              <div>วันที่ออกใบเสร็จ: {{date}}</div>
+              <div>งานกิจกรรม: {{activity_title}}</div>
+            </div>
+            <div class="col">
+              <div class="label">ออกให้</div>
+              <div>{{customer_name}}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="label">รายละเอียดรายการ</div>
+        <table>
+          <thead>
+            <tr>
+              <th>รายละเอียด</th>
+              <th style="width: 120px; text-align: right;">ยอด (บาท)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{lines}}
+          </tbody>
+        </table>
+
+        <table class="total-table">
+          <tr>
+            <td class="total-label">ยอดรวมรายการ</td>
+            <td class="total-value total-strong">{{total_amount}} บาท</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="footer">
+        เอกสารนี้สร้างจากระบบ Molly Fish Event
+        สำหรับใช้ยืนยันการชำระเงินเท่านั้น
+      </div>
+    </div>
+  </body>
+</html>
+

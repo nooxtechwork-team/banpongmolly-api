@@ -25,6 +25,36 @@ export class MailService {
     }
   }
 
+  async sendRawEmail(options: {
+    to: string;
+    subject: string;
+    text?: string;
+    html?: string;
+    attachments?: { filename: string; content: Buffer | string }[];
+  }): Promise<void> {
+    if (!this.transporter) {
+      this.logger.warn('Mail not configured, skipping email');
+      return;
+    }
+    try {
+      await this.transporter.sendMail({
+        from: this.configService.get<string>('MAIL_USERNAME'),
+        to: options.to,
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
+        attachments: options.attachments,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to send email to ${options.to}: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+      throw err;
+    }
+  }
+
   async sendVerificationEmail(to: string, token: string): Promise<void> {
     if (!this.transporter) {
       this.logger.warn('Mail not configured, skipping verification email');

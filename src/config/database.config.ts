@@ -20,6 +20,7 @@ import { AccessLog } from '../entities/access-log.entity';
 import { LoginLog } from '../entities/login-log.entity';
 import { UserActionLog } from '../entities/user-action-log.entity';
 import { ContactMessage } from '../entities/contact-message.entity';
+import { PaymentConfig } from '../entities/payment-config.entity';
 import { News } from '../entities/news.entity';
 
 export const getDatabaseConfig = (
@@ -53,6 +54,7 @@ export const getDatabaseConfig = (
     UserActionLog,
     ContactMessage,
     News,
+    PaymentConfig,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',

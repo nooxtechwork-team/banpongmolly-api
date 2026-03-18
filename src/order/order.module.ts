@@ -15,6 +15,7 @@ import { CheckInGateway } from './check-in.gateway';
 import { PaymentsAdminController } from './payments-admin.controller';
 import { DashboardAdminController } from './dashboard-admin.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { AdminOrderController } from './admin-order.controller';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     ApplicantsController,
     CheckInController,
     PaymentsAdminController,
+    AdminOrderController,
     DashboardAdminController,
   ],
   exports: [OrderService],

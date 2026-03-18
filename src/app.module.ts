@@ -16,6 +16,7 @@ import { OrderModule } from './order/order.module';
 import { SponsorModule } from './sponsor/sponsor.module';
 import { ContactModule } from './contact/contact.module';
 import { NewsModule } from './news/news.module';
+import { PaymentConfigModule } from './payment-config/payment-config.module';
 import { AccessLogModule } from './access-log/access-log.module';
 import { LoginLogModule } from './login-log/login-log.module';
 import { UserActionLogModule } from './user-action-log/user-action-log.module';
@@ -48,6 +49,7 @@ import { getDatabaseConfig } from './config/database.config';
     SponsorModule,
     ContactModule,
     NewsModule,
+    PaymentConfigModule,
   ],
   controllers: [AppController],
   providers: [AppService],

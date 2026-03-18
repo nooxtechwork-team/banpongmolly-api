@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { AuditLogService } from './audit-log/audit-log.service';
 import { AccessLogService } from './access-log/access-log.service';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import * as bodyParser from 'body-parser';
 import { join } from 'path';
 
 async function bootstrap() {
@@ -24,6 +25,19 @@ async function bootstrap() {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
   });
+
+  // Increase JSON and URL-encoded body size limits to handle large payloads
+  app.use(
+    bodyParser.json({
+      limit: '5mb',
+    }),
+  );
+  app.use(
+    bodyParser.urlencoded({
+      limit: '5mb',
+      extended: true,
+    }),
+  );
 
   // Global validation pipe
   app.useGlobalPipes(
