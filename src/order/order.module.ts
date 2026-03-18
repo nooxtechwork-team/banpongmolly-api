@@ -4,6 +4,7 @@ import { Order } from '../entities/order.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration } from '../entities/sponsor.entity';
+import { ActivityPackage } from '../entities/activity-package.entity';
 import { OrderService } from './order.service';
 import { OrderController } from './order.controller';
 import { MyOrderController } from './my-order.controller';
@@ -24,6 +25,7 @@ import { AdminOrderController } from './admin-order.controller';
       ActivityRegistration,
       Activity,
       SponsorRegistration,
+      ActivityPackage,
     ]),
     AuditLogModule,
   ],

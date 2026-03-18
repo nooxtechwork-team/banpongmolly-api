@@ -7,6 +7,7 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { User } from '../entities/user.entity';
+import { ActivityPackage } from '../entities/activity-package.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { MailService } from '../mail/mail.service';
 import * as puppeteer from 'puppeteer';
@@ -24,6 +25,8 @@ export class OrderService {
     private readonly activityRepository: Repository<Activity>,
     @InjectRepository(SponsorRegistration)
     private readonly sponsorRepository: Repository<SponsorRegistration>,
+    @InjectRepository(ActivityPackage)
+    private readonly activityPackageRepository: Repository<ActivityPackage>,
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
   ) {}
@@ -232,6 +235,7 @@ export class OrderService {
   async findMyOrderDetail(
     user: User,
     orderNo: string,
+    status?: OrderStatus | null,
   ): Promise<{
     order: Order;
     registration: ActivityRegistration | null;
@@ -244,9 +248,21 @@ export class OrderService {
       line_total: number;
     }[];
   }> {
-    const order = await this.orderRepository.findOne({
-      where: { order_no: orderNo },
-    });
+    // Only filter by `status` when it's explicitly provided.
+    const where: {
+      order_no: string;
+      user_id: number;
+      status?: OrderStatus;
+    } = {
+      order_no: orderNo,
+      user_id: user.id,
+    };
+
+    if (status !== undefined && status !== null) {
+      where.status = status;
+    }
+
+    const order = await this.orderRepository.findOne({ where });
 
     if (!order) {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
@@ -456,17 +472,37 @@ export class OrderService {
     registration = await this.registrationRepository.findOne({
       where: { id: order.refer_id },
     });
+
     if (registration) {
       try {
         const parsed = JSON.parse(registration.entries_json);
         if (Array.isArray(parsed)) {
-          entries = parsed.map((e: any) => ({
-            package_id: Number(e.package_id),
-            package_name: e.package_name,
-            quantity: Number(e.quantity),
-            unit_price: Number(e.unit_price),
-            line_total: Number(e.line_total),
-          }));
+          const packageIds = parsed
+            .map((e: any) => Number(e.package_id))
+            .filter((id: number) => !Number.isNaN(id));
+
+          const packages = packageIds.length
+            ? await this.activityPackageRepository.find({
+                where: { id: In(packageIds) },
+              })
+            : [];
+
+          const packageNameById = new Map<number, string>(
+            (packages || []).map((p) => [p.id, p.name]),
+          );
+
+          entries = parsed.map((e: any) => {
+            const packageId = Number(e.package_id);
+            const packageName =
+              packageNameById.get(packageId) ?? `ค่าสมัครแพ็กเกจ #${packageId}`;
+            return {
+              package_id: packageId,
+              package_name: packageName,
+              quantity: Number(e.quantity),
+              unit_price: Number(e.unit_price),
+              line_total: Number(e.line_total),
+            };
+          });
         }
       } catch {
         entries = [];
@@ -683,8 +719,9 @@ export class OrderService {
 
   /**
    * สร้างไฟล์ PDF ใบเสร็จรับเงินจาก HTML template ด้วย Puppeteer
+   * ใช้ได้ทั้งฝั่ง admin และฝั่งผู้ใช้ (my orders)
    */
-  private async generateReceiptPdf(orderId: number): Promise<Uint8Array> {
+  async generateReceiptPdf(orderId: number): Promise<Uint8Array> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
     });
@@ -703,10 +740,16 @@ export class OrderService {
       activityTitle = detail.activity?.title ?? '';
       customerName = detail.registration?.applicant_name ?? order.customer_name;
       lines =
-        detail.entries?.map((e) => ({
-          label: `ค่าสมัครแพ็กเกจ #${e.package_id} ${e.package_name}`,
-          amount: e.line_total,
-        })) ?? [];
+        detail.entries?.map((e) => {
+          const displayName = e.package_name?.toString().trim() || '';
+          const label = displayName
+            ? displayName
+            : `ค่าสมัครแพ็กเกจ #${e.package_id}`;
+          return {
+            label,
+            amount: e.line_total,
+          };
+        }) ?? [];
     } else if (order.type === OrderType.SPONSOR) {
       const detail = await this.findAdminSponsorPaymentDetail(orderId);
       activityTitle = detail.activity?.title ?? '';

@@ -6,6 +6,7 @@ import {
   UseGuards,
   UseInterceptors,
   Request,
+  Res,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ResponseInterceptor } from '../common/interceptors/response.interceptor';
@@ -58,5 +59,26 @@ export class MyOrderController {
     @Param('orderNo') orderNo: string,
   ) {
     return this.orderService.findMyOrderDetail(req.user, orderNo);
+  }
+
+  @Get(':orderNo/receipt.pdf')
+  @UseGuards(JwtAuthGuard)
+  async downloadReceiptPdf(
+    @Request() req: { user: User },
+    @Param('orderNo') orderNo: string,
+    @Res() res: any,
+  ) {
+    const { order } = await this.orderService.findMyOrderDetail(
+      req.user,
+      orderNo,
+      OrderStatus.PAID,
+    );
+    const pdf = await this.orderService.generateReceiptPdf(order.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="receipt-${order.order_no}.pdf"`,
+    );
+    return res.send(Buffer.from(pdf));
   }
 }
