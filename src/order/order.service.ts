@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, MoreThanOrEqual, Repository } from 'typeorm';
+import { In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -13,6 +13,9 @@ import { MailService } from '../mail/mail.service';
 import * as puppeteer from 'puppeteer';
 import * as fs from 'fs';
 import * as path from 'path';
+import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
+
+type PackageSlugChain = { parentSlug: string | null; leafSlug: string };
 
 @Injectable()
 export class OrderService {
@@ -30,6 +33,38 @@ export class OrderService {
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
   ) {}
+
+  private async loadPackageSlugChainsByLeafIds(
+    leafIds: number[],
+  ): Promise<Map<number, PackageSlugChain>> {
+    const map = new Map<number, PackageSlugChain>();
+    if (!leafIds.length) return map;
+    const unique = [...new Set(leafIds)];
+    const leaves = await this.activityPackageRepository.find({
+      where: { id: In(unique), deleted_at: IsNull() },
+    });
+    const parentIds = [
+      ...new Set(
+        leaves
+          .map((l) => l.parent_id)
+          .filter((id): id is number => id != null && !Number.isNaN(id)),
+      ),
+    ];
+    const parents = parentIds.length
+      ? await this.activityPackageRepository.find({
+          where: { id: In(parentIds), deleted_at: IsNull() },
+        })
+      : [];
+    const parentById = new Map(parents.map((p) => [p.id, p]));
+    for (const leaf of leaves) {
+      const pslug =
+        leaf.parent_id != null
+          ? parentById.get(leaf.parent_id)?.slug ?? null
+          : null;
+      map.set(leaf.id, { parentSlug: pslug, leafSlug: leaf.slug });
+    }
+    return map;
+  }
 
   async createActivityRegistrationOrder(params: {
     registrationId: number;
@@ -242,7 +277,10 @@ export class OrderService {
     sponsor: SponsorRegistration | null;
     activity: Activity | null;
     entries: {
+      index?: string;
+      entry_code?: string;
       package_id: number;
+      package_name: string;
       quantity: number;
       unit_price: number;
       line_total: number;
@@ -276,6 +314,8 @@ export class OrderService {
     let sponsor: SponsorRegistration | null = null;
     let activity: Activity | null = null;
     let entries: {
+      index?: string;
+      entry_code?: string;
       package_id: number;
       package_name: string;
       quantity: number;
@@ -292,13 +332,57 @@ export class OrderService {
         try {
           const parsed = JSON.parse(registration.entries_json);
           if (Array.isArray(parsed)) {
-            entries = parsed.map((e: any) => ({
-              package_id: Number(e.package_id),
-              package_name: e.package_name ?? '',
-              quantity: Number(e.quantity),
-              unit_price: Number(e.unit_price),
-              line_total: Number(e.line_total),
-            }));
+            const packageIds = parsed
+              .map((e: any) => Number(e.package_id))
+              .filter((id: number) => !Number.isNaN(id));
+
+            const packages = packageIds.length
+              ? await this.activityPackageRepository.find({
+                  where: { id: In(packageIds) },
+                })
+              : [];
+
+            const packageNameById = new Map<number, string>(
+              (packages || []).map((p) => [p.id, p.name]),
+            );
+
+            const slugChains =
+              await this.loadPackageSlugChainsByLeafIds(packageIds);
+
+            entries = parsed.map((e: any) => {
+              const packageId = Number(e.package_id);
+              const packageName =
+                packageNameById.get(packageId) ??
+                `ค่าสมัครแพ็กเกจ #${packageId}`;
+              const idxRaw = e.index;
+              const idxStr =
+                idxRaw !== undefined && idxRaw !== null && idxRaw !== ''
+                  ? String(idxRaw)
+                  : '';
+              const storedCode =
+                e.entry_code != null && String(e.entry_code).trim() !== ''
+                  ? String(e.entry_code).trim()
+                  : '';
+              const chain = slugChains.get(packageId);
+              const entry_code =
+                storedCode ||
+                (chain
+                  ? buildActivityRegistrationEntryCode(
+                      chain.parentSlug,
+                      chain.leafSlug,
+                      idxStr || '0000',
+                    )
+                  : undefined);
+              return {
+                ...(idxStr ? { index: idxStr } : {}),
+                ...(entry_code ? { entry_code } : {}),
+                package_id: packageId,
+                package_name: packageName,
+                quantity: Number(e.quantity),
+                unit_price: Number(e.unit_price),
+                line_total: Number(e.line_total),
+              };
+            });
           }
         } catch {
           entries = [];
@@ -445,6 +529,8 @@ export class OrderService {
     } | null;
     activity: { id: number; title: string } | null;
     entries: {
+      index?: string;
+      entry_code?: string;
       package_id: number;
       package_name: string;
       quantity: number;
@@ -462,6 +548,8 @@ export class OrderService {
     let registration: ActivityRegistration | null = null;
     let activity: Activity | null = null;
     let entries: {
+      index?: string;
+      entry_code?: string;
       package_id: number;
       package_name: string;
       quantity: number;
@@ -491,11 +579,35 @@ export class OrderService {
             (packages || []).map((p) => [p.id, p.name]),
           );
 
+          const slugChains =
+            await this.loadPackageSlugChainsByLeafIds(packageIds);
+
           entries = parsed.map((e: any) => {
             const packageId = Number(e.package_id);
             const packageName =
               packageNameById.get(packageId) ?? `ค่าสมัครแพ็กเกจ #${packageId}`;
+            const idxRaw = e.index;
+            const idxStr =
+              idxRaw !== undefined && idxRaw !== null && idxRaw !== ''
+                ? String(idxRaw)
+                : '';
+            const storedCode =
+              e.entry_code != null && String(e.entry_code).trim() !== ''
+                ? String(e.entry_code).trim()
+                : '';
+            const chain = slugChains.get(packageId);
+            const entry_code =
+              storedCode ||
+              (chain
+                ? buildActivityRegistrationEntryCode(
+                    chain.parentSlug,
+                    chain.leafSlug,
+                    idxStr || '0000',
+                  )
+                : undefined);
             return {
+              ...(idxStr ? { index: idxStr } : {}),
+              ...(entry_code ? { entry_code } : {}),
               package_id: packageId,
               package_name: packageName,
               quantity: Number(e.quantity),
@@ -742,11 +854,18 @@ export class OrderService {
       lines =
         detail.entries?.map((e) => {
           const displayName = e.package_name?.toString().trim() || '';
-          const label = displayName
+          const base = displayName
             ? displayName
             : `ค่าสมัครแพ็กเกจ #${e.package_id}`;
+          const code =
+            e.entry_code != null && String(e.entry_code).trim() !== ''
+              ? String(e.entry_code).trim()
+              : e.index !== undefined && e.index !== null && String(e.index) !== ''
+                ? String(e.index)
+                : '';
+          const prefix = code ? `[${code}] ` : '';
           return {
-            label,
+            label: `${prefix}${base}`,
             amount: e.line_total,
           };
         }) ?? [];

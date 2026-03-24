@@ -38,6 +38,12 @@ export class Activity {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  /**
+   * JSON: [{ title?, platform, embed_url }] — URL สำหรับ iframe ถ่ายทอด/ฝัง FB, TT, IG, YouTube
+   */
+  @Column({ type: 'text', nullable: true })
+  live_embeds_json: string | null;
+
   @Column({ type: 'varchar', length: 512, nullable: true })
   detail_infographic_url: string | null;
 

@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Param, Post, Query, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
+import type { Request as ExpressRequest } from 'express';
+import { User } from '../entities/user.entity';
 import { Activity } from '../entities/activity.entity';
 import {
   ActivityLeafClass,
@@ -72,12 +83,21 @@ export class PublicActivityController {
   async register(
     @Param('slug') slug: string,
     @Body() dto: CreateActivityRegistrationDto,
-    @Request() req: { user: { id: number } },
+    @Request() req: ExpressRequest & { user: User },
   ) {
+    const ipHeader =
+      (req.headers?.['x-forwarded-for'] as string | undefined) || '';
+    const clientIp = ipHeader.split(',')[0]?.trim() || req.ip || null;
+    const userAgent =
+      (req.headers?.['user-agent'] as string | undefined) || null;
     const result = await this.activityService.createRegistrationForSlug(
       slug,
       dto,
       req.user.id,
+      {
+        ip: typeof clientIp === 'string' ? clientIp : null,
+        userAgent,
+      },
     );
     return result;
   }

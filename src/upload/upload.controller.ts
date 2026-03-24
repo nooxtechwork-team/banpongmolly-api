@@ -73,4 +73,18 @@ export class UploadController {
     const url = await this.uploadService.saveFile(file, 'activities');
     return { url };
   }
+
+  /** รูป PromptPay / QR ในหน้าตั้งค่าบัญชีผู้รับเงิน (แยก path จากสลิปผู้สมัคร) */
+  @Post('payment-config-qr')
+  @UseInterceptors(FileInterceptor('file', multerOptions(5 * 1024 * 1024)))
+  async uploadPaymentConfigQr(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ url: string }> {
+    if (!file) throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
+    if (!IMAGE_MIME_TYPES.includes(file.mimetype as any)) {
+      throw new BadRequestException('รองรับเฉพาะรูปภาพ (JPEG, PNG, GIF, WebP)');
+    }
+    const url = await this.uploadService.saveFile(file, 'payment-configs');
+    return { url };
+  }
 }

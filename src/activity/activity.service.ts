@@ -21,7 +21,18 @@ import {
 } from './activity-reward.service';
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
+import {
+  allocateFormattedActivityEntryIndices,
+  maxNumericIndexFromParsedEntries,
+} from '../common/utils/activity-entry-index.util';
+import {
+  ActivityLiveEmbed,
+  parseActivityLiveEmbedsJson,
+  serializeActivityLiveEmbeds,
+} from '../common/utils/activity-live-embeds.util';
+import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 import { UserActionLogService } from '../user-action-log/user-action-log.service';
+import { LegalPolicyService } from '../legal/legal-policy.service';
 
 const UPLOAD_SUBDIR = 'activities' as const;
 
@@ -38,6 +49,7 @@ export type ActivityPublicDetail = Activity & {
   rewards?: ActivityRewardDto[];
   tags?: ActivityTagDto[];
   sponsor_packages?: SponsorPackage[];
+  live_embeds: ActivityLiveEmbed[];
 };
 
 export interface ActivityLeafClass {
@@ -64,6 +76,7 @@ export class ActivityService {
     private readonly activityTagService: ActivityTagService,
     private readonly orderService: OrderService,
     private readonly userActionLogService: UserActionLogService,
+    private readonly legalPolicyService: LegalPolicyService,
   ) {}
 
   async findAll(): Promise<Activity[]> {
@@ -157,6 +170,26 @@ export class ActivityService {
     return { total_amount, items };
   }
 
+  /**
+   * เลขลำดับรายการสมัครล่าสุดของกิจกรรม (ดูจาก entries_json ของทุกใบสมัครใน activity เดียวกัน)
+   */
+  async getMaxEntryIndexForActivity(activityId: number): Promise<number> {
+    const rows = await this.registrationRepository.find({
+      where: { activity_id: activityId },
+      select: ['entries_json'],
+    });
+    let max = 0;
+    for (const r of rows) {
+      try {
+        const parsed = JSON.parse(r.entries_json || '[]');
+        max = Math.max(max, maxNumericIndexFromParsedEntries(parsed));
+      } catch {
+        // ignore malformed json
+      }
+    }
+    return max;
+  }
+
   async createRegistrationForSlug(
     slug: string,
     payload: {
@@ -169,8 +202,12 @@ export class ActivityService {
       note?: string;
       entries: { package_id: number; quantity: number }[];
       payment_slip?: string;
+      accept_policies: boolean;
+      terms_policy_version: string;
+      privacy_policy_version: string;
     },
     userId?: number | null,
+    meta?: { ip?: string | null; userAgent?: string | null },
   ): Promise<{
     registration: ActivityRegistration;
     order: {
@@ -198,10 +235,63 @@ export class ActivityService {
       throw new BadRequestException('กิจกรรมนี้ปิดรับสมัครแล้ว');
     }
 
+    if (userId == null) {
+      throw new BadRequestException('ต้องเข้าสู่ระบบก่อนสมัครกิจกรรม');
+    }
+
+    if (!payload.accept_policies) {
+      throw new BadRequestException('กรุณายอมรับนโยบายและข้อกำหนดก่อนสมัคร');
+    }
+
+    await this.legalPolicyService.assertVersionsMatchActive(
+      payload.terms_policy_version,
+      payload.privacy_policy_version,
+    );
+
     const { total_amount, items } = await this.calculateEntriesTotalForSlug(
       slug,
       payload.entries,
     );
+
+    const lineCount = items.reduce((sum, i) => sum + i.quantity, 0);
+    const startIndex = (await this.getMaxEntryIndexForActivity(activity.id)) + 1;
+    const formattedIndices = allocateFormattedActivityEntryIndices(
+      startIndex,
+      lineCount,
+    );
+
+    const leafIds = [...new Set(items.map((i) => i.package_id))];
+    const slugChains =
+      await this.activityPackageService.findSlugChainsByLeafIds(leafIds);
+
+    let idxPos = 0;
+    const storedLines: {
+      index: string;
+      entry_code: string;
+      package_id: number;
+      quantity: number;
+      unit_price: number;
+      line_total: number;
+    }[] = [];
+    for (const i of items) {
+      for (let k = 0; k < i.quantity; k++) {
+        const idxStr = formattedIndices[idxPos++]!;
+        const chain = slugChains.get(i.package_id);
+        const entry_code = buildActivityRegistrationEntryCode(
+          chain?.parentSlug ?? null,
+          chain?.leafSlug ?? '',
+          idxStr,
+        );
+        storedLines.push({
+          index: idxStr,
+          entry_code,
+          package_id: i.package_id,
+          quantity: 1,
+          unit_price: i.unit_price,
+          line_total: i.unit_price,
+        });
+      }
+    }
 
     const entity = this.registrationRepository.create({
       registration_no: generateReferenceNo('AR'),
@@ -214,19 +304,22 @@ export class ActivityService {
       email: payload.email ?? null,
       line: payload.line ?? null,
       note: payload.note ?? null,
-      entries_json: JSON.stringify(
-        items.map((i) => ({
-          package_id: i.package_id,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          line_total: i.line_total,
-        })),
-      ),
+      entries_json: JSON.stringify(storedLines),
       total_amount,
       payment_slip: payload.payment_slip ?? null,
     });
 
     const saved = await this.registrationRepository.save(entity);
+
+    await this.legalPolicyService.recordAcceptances({
+      userId,
+      termsVersion: payload.terms_policy_version,
+      privacyVersion: payload.privacy_policy_version,
+      source: 'activity_registration',
+      ip: meta?.ip ?? null,
+      userAgent: meta?.userAgent ?? null,
+      relatedRegistrationId: saved.id,
+    });
 
     // สร้าง Order สำหรับ workflow การชำระเงิน/ติดตามต่อ
     const order = await this.orderService.createActivityRegistrationOrder({
@@ -457,7 +550,14 @@ export class ActivityService {
       this.activityTagService.getTagsForActivity(activity.id),
       this.getSponsorPackagesForActivity(activity.id),
     ]);
-    return { ...activity, price_range, rewards, tags, sponsor_packages };
+    return {
+      ...activity,
+      price_range,
+      rewards,
+      tags,
+      sponsor_packages,
+      live_embeds: parseActivityLiveEmbedsJson(activity.live_embeds_json),
+    };
   }
 
   /**
@@ -529,6 +629,13 @@ export class ActivityService {
       cover_image,
       banner_image,
       description: dto.description ?? null,
+      live_embeds_json: serializeActivityLiveEmbeds(
+        dto.live_embeds?.map((e) => ({
+          title: e.title,
+          platform: e.platform as ActivityLiveEmbed['platform'],
+          embed_url: e.embed_url,
+        })),
+      ),
       detail_infographic_url: dto.detail_infographic_url ?? null,
       start_date: startDate,
       end_date: endDate,
@@ -648,6 +755,15 @@ export class ActivityService {
     }
     if (dto.start_time !== undefined) updates.start_time = dto.start_time;
     if (dto.end_time !== undefined) updates.end_time = dto.end_time;
+    if (dto.live_embeds !== undefined) {
+      updates.live_embeds_json = serializeActivityLiveEmbeds(
+        dto.live_embeds.map((e) => ({
+          title: e.title,
+          platform: e.platform as ActivityLiveEmbed['platform'],
+          embed_url: e.embed_url,
+        })),
+      );
+    }
 
     const merged = this.activityRepository.merge(existing, updates);
     const saved = await this.activityRepository.save(merged);

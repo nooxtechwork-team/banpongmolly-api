@@ -1,9 +1,11 @@
 import {
+  IsBoolean,
   IsEmail,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { CalculateEntriesDto } from './calculate-entries.dto';
 
 export class CreateActivityRegistrationDto extends CalculateEntriesDto {
@@ -43,5 +45,17 @@ export class CreateActivityRegistrationDto extends CalculateEntriesDto {
   @IsString()
   @MaxLength(512)
   payment_slip?: string;
+
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean({ message: 'กรุณายอมรับนโยบายและข้อกำหนดก่อนสมัคร' })
+  accept_policies: boolean;
+
+  @IsString()
+  @MaxLength(32)
+  terms_policy_version: string;
+
+  @IsString()
+  @MaxLength(32)
+  privacy_policy_version: string;
 }
 

@@ -22,6 +22,8 @@ import { UserActionLog } from '../entities/user-action-log.entity';
 import { ContactMessage } from '../entities/contact-message.entity';
 import { PaymentConfig } from '../entities/payment-config.entity';
 import { News } from '../entities/news.entity';
+import { LegalPolicy } from '../entities/legal-policy.entity';
+import { PolicyAcceptance } from '../entities/policy-acceptance.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -55,6 +57,8 @@ export const getDatabaseConfig = (
     ContactMessage,
     News,
     PaymentConfig,
+    LegalPolicy,
+    PolicyAcceptance,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',

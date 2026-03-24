@@ -78,6 +78,10 @@ export class User {
   @Column({ type: 'varchar', length: 10, default: '1.0' })
   privacy_policy_version: string;
 
+  /** เวอร์ชันข้อกำหนดและเงื่อนไขที่ผู้ใช้ยอมรับล่าสุด (อ้างอิง legal_policies.version) */
+  @Column({ type: 'varchar', length: 32, default: '0' })
+  terms_policy_version: string;
+
   @OneToMany(() => UserAuth, (userAuth) => userAuth.user)
   auths: UserAuth[];
 }

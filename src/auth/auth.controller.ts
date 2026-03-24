@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import type { Response } from 'express';
+import type { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -24,6 +24,7 @@ import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AcceptPoliciesDto } from './dto/accept-policies.dto';
 import { ResponseInterceptor } from '../common/interceptors/response.interceptor';
 import { AuthGuard } from '@nestjs/passport';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -177,6 +178,24 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getMe(@Request() req: { user: User }) {
     return this.authService.getProfile(req.user);
+  }
+
+  @Post('accept-policies')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async acceptPolicies(
+    @Body() dto: AcceptPoliciesDto,
+    @Request() req: ExpressRequest & { user: User },
+  ) {
+    const ipHeader =
+      (req.headers?.['x-forwarded-for'] as string | undefined) || '';
+    const clientIp = ipHeader.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+    const userAgent =
+      (req.headers?.['user-agent'] as string | undefined) || null;
+    return this.authService.acceptPolicies(req.user, dto, {
+      ip: typeof clientIp === 'string' ? clientIp : null,
+      userAgent,
+    });
   }
 
   @Patch('me')

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { ActivityPackagePrice } from '../entities/activity-package-price.entity';
 import { CreateActivityPackageDto } from './dto/create-activity-package.dto';
@@ -20,6 +20,12 @@ export interface ActivityPackageTreeNode extends ActivityPackageWithPrice {
   children: ActivityPackageTreeNode[];
 }
 
+/** slug แม่ (ถ้ามี) + slug ของโหนดลูกที่สมัคร */
+export type PackageSlugChain = {
+  parentSlug: string | null;
+  leafSlug: string;
+};
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -36,6 +42,41 @@ export class ActivityPackageService {
     @InjectRepository(ActivityPackagePrice)
     private readonly priceRepository: Repository<ActivityPackagePrice>,
   ) {}
+
+  /**
+   * โหลด slug ของแพ็กเกจลูกและแม่ ครั้งเดียวต่อชุด leaf id (ใช้สร้างรหัสรายการสมัคร)
+   */
+  async findSlugChainsByLeafIds(
+    leafIds: number[],
+  ): Promise<Map<number, PackageSlugChain>> {
+    const map = new Map<number, PackageSlugChain>();
+    if (!leafIds.length) return map;
+    const unique = [...new Set(leafIds)];
+    const leaves = await this.packageRepository.find({
+      where: { id: In(unique), deleted_at: IsNull() },
+    });
+    const parentIds = [
+      ...new Set(
+        leaves
+          .map((l) => l.parent_id)
+          .filter((id): id is number => id != null && !Number.isNaN(id)),
+      ),
+    ];
+    const parents = parentIds.length
+      ? await this.packageRepository.find({
+          where: { id: In(parentIds), deleted_at: IsNull() },
+        })
+      : [];
+    const parentById = new Map(parents.map((p) => [p.id, p]));
+    for (const leaf of leaves) {
+      const pslug =
+        leaf.parent_id != null
+          ? parentById.get(leaf.parent_id)?.slug ?? null
+          : null;
+      map.set(leaf.id, { parentSlug: pslug, leafSlug: leaf.slug });
+    }
+    return map;
+  }
 
   async findAll(): Promise<ActivityPackageWithPrice[]> {
     const packages = await this.packageRepository.find({

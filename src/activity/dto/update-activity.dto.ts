@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -7,9 +8,11 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ActivityStatus } from '../../entities/activity.entity';
+import { ActivityLiveEmbedDto } from './activity-live-embed.dto';
 
 export class UpdateActivityDto {
   @IsOptional()
@@ -125,4 +128,11 @@ export class UpdateActivityDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @ValidateNested({ each: true })
+  @Type(() => ActivityLiveEmbedDto)
+  live_embeds?: ActivityLiveEmbedDto[];
 }

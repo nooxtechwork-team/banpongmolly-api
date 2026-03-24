@@ -17,6 +17,7 @@ import { UploadModule } from '../upload/upload.module';
 import { ActivityPackageModule } from '../activity-package/activity-package.module';
 import { OrderModule } from '../order/order.module';
 import { UserActionLogModule } from '../user-action-log/user-action-log.module';
+import { LegalModule } from '../legal/legal.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { UserActionLogModule } from '../user-action-log/user-action-log.module';
     ActivityPackageModule,
     OrderModule,
     UserActionLogModule,
+    LegalModule,
   ],
   providers: [
     ActivityService,

@@ -22,6 +22,8 @@ import { LoginLogService } from '../login-log/login-log.service';
 import type { LoginProvider, LoginStatus } from '../entities/login-log.entity';
 import * as fs from 'fs';
 import * as path from 'path';
+import { LegalPolicyService } from '../legal/legal-policy.service';
+import { AcceptPoliciesDto } from './dto/accept-policies.dto';
 
 @Injectable()
 export class AuthService {
@@ -36,6 +38,7 @@ export class AuthService {
     private configService: ConfigService,
     private mailService: MailService,
     private loginLogService: LoginLogService,
+    private legalPolicyService: LegalPolicyService,
   ) {
     const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
     if (googleClientId) {
@@ -50,12 +53,18 @@ export class AuthService {
       fullname,
       phone_number,
       accepted_terms,
+      terms_policy_version,
       privacy_policy_version,
     } = registerDto;
 
     if (!accepted_terms) {
       throw new BadRequestException('กรุณายอมรับข้อกำหนดและเงื่อนไข');
     }
+
+    await this.legalPolicyService.assertVersionsMatchActive(
+      terms_policy_version,
+      privacy_policy_version,
+    );
 
     // Check if user already exists
     const existingUser = await this.userRepository.findOne({
@@ -84,10 +93,21 @@ export class AuthService {
       phone_number: phone_number || null,
       is_verified: false,
       accepted_terms_at: now,
-      privacy_policy_version: privacy_policy_version || '1.0',
+      terms_policy_version,
+      privacy_policy_version,
     });
 
     const savedUser = await this.userRepository.save(user);
+
+    await this.legalPolicyService.recordAcceptances({
+      userId: savedUser.id,
+      termsVersion: terms_policy_version,
+      privacyVersion: privacy_policy_version,
+      source: 'signup',
+      ip: null,
+      userAgent: null,
+      relatedRegistrationId: null,
+    });
 
     // Create auth record
     const userAuth = this.userAuthRepository.create({
@@ -255,14 +275,7 @@ export class AuthService {
 
     return ResponseUtil.success(
       {
-        user: {
-          id: user.id,
-          email: user.email,
-          fullname: user.fullname,
-          avatar_url: user.avatar_url,
-          role: user.role,
-          is_verified: user.is_verified,
-        },
+        user: this.buildAuthUserPublic(user),
         ...tokens,
       },
       'เข้าสู่ระบบสำเร็จ',
@@ -440,7 +453,7 @@ export class AuthService {
     });
 
     if (existingAuth?.user && !existingAuth.user.deleted_at) {
-      return this.ensureAcceptedTerms(existingAuth.user);
+      return existingAuth.user;
     }
 
     // ยังไม่เคยผูก LINE: หา user จากอีเมลก่อน
@@ -455,13 +468,11 @@ export class AuthService {
         fullname,
         avatar_url: avatarUrl,
         is_verified: true,
-        accepted_terms_at: new Date(),
-        privacy_policy_version:
-          this.configService.get<string>('PRIVACY_POLICY_VERSION') || '1.0',
+        accepted_terms_at: null,
+        terms_policy_version: '0',
+        privacy_policy_version: '0',
       });
       user = await this.userRepository.save(user);
-    } else {
-      user = await this.ensureAcceptedTerms(user);
     }
 
     const userAuth = this.userAuthRepository.create({
@@ -531,14 +542,7 @@ export class AuthService {
 
       return ResponseUtil.success(
         {
-          user: {
-            id: user.id,
-            email: user.email,
-            fullname: user.fullname,
-            avatar_url: user.avatar_url,
-            role: user.role,
-            is_verified: user.is_verified,
-          },
+          user: this.buildAuthUserPublic(user),
           ...tokens,
         },
         'เข้าสู่ระบบด้วย Google สำเร็จ',
@@ -601,7 +605,7 @@ export class AuthService {
     });
 
     if (existingAuth?.user && !existingAuth.user.deleted_at) {
-      return this.ensureAcceptedTerms(existingAuth.user);
+      return existingAuth.user;
     }
 
     // ครั้งแรก: ยังไม่มี provider_id นี้ → insert user ด้วย profile data จาก Google (เหมือนสมัคร)
@@ -616,13 +620,11 @@ export class AuthService {
         fullname,
         avatar_url: avatarUrl,
         is_verified: true,
-        accepted_terms_at: new Date(),
-        privacy_policy_version:
-          this.configService.get<string>('PRIVACY_POLICY_VERSION') || '1.0',
+        accepted_terms_at: null,
+        terms_policy_version: '0',
+        privacy_policy_version: '0',
       });
       user = await this.userRepository.save(user);
-    } else {
-      user = await this.ensureAcceptedTerms(user);
     }
 
     // ผูก Google กับ user (insert user_auth)
@@ -633,21 +635,6 @@ export class AuthService {
     });
     await this.userAuthRepository.save(userAuth);
 
-    return user;
-  }
-
-  /**
-   * ถ้า user ยังไม่มี accepted_terms_at (เช่น สมัครผ่าน OAuth เดิม ๆ) ให้ stamp ให้
-   */
-  private async ensureAcceptedTerms(user: User): Promise<User> {
-    if (!user.accepted_terms_at) {
-      user.accepted_terms_at = new Date();
-      user.privacy_policy_version =
-        user.privacy_policy_version ||
-        this.configService.get<string>('PRIVACY_POLICY_VERSION') ||
-        '1.0';
-      user = await this.userRepository.save(user);
-    }
     return user;
   }
 
@@ -679,6 +666,52 @@ export class AuthService {
     };
   }
 
+  /** ข้อมูล user สำหรับล็อกอิน / ส่งให้ frontend (รวมสถานะต้องยอมรับนโยบายหรือไม่) */
+  private buildAuthUserPublic(user: User) {
+    return {
+      id: user.id,
+      email: user.email,
+      fullname: user.fullname,
+      avatar_url: user.avatar_url,
+      role: user.role,
+      is_verified: user.is_verified,
+      requires_policy_acceptance: !user.accepted_terms_at,
+    };
+  }
+
+  async acceptPolicies(
+    user: User,
+    dto: AcceptPoliciesDto,
+    context?: { ip?: string | null; userAgent?: string | null },
+  ) {
+    if (!dto.accept_policies) {
+      throw new BadRequestException('กรุณายืนยันการยอมรับนโยบาย');
+    }
+    await this.legalPolicyService.assertVersionsMatchActive(
+      dto.terms_policy_version,
+      dto.privacy_policy_version,
+    );
+    const now = new Date();
+    user.accepted_terms_at = now;
+    user.terms_policy_version = dto.terms_policy_version;
+    user.privacy_policy_version = dto.privacy_policy_version;
+    await this.userRepository.save(user);
+    await this.legalPolicyService.recordAcceptances({
+      userId: user.id,
+      termsVersion: dto.terms_policy_version,
+      privacyVersion: dto.privacy_policy_version,
+      source: 'account_reaccept',
+      ip: context?.ip ?? null,
+      userAgent: context?.userAgent ?? null,
+      relatedRegistrationId: null,
+    });
+    const reloaded = await this.userRepository.findOne({
+      where: { id: user.id },
+      relations: ['province'],
+    });
+    return this.getProfile(reloaded ?? user);
+  }
+
   async getProfile(user: User) {
     return ResponseUtil.success(
       {
@@ -697,6 +730,10 @@ export class AuthService {
           role: user.role,
           is_verified: user.is_verified,
           created_at: user.created_at,
+          accepted_terms_at: user.accepted_terms_at,
+          requires_policy_acceptance: !user.accepted_terms_at,
+          terms_policy_version: user.terms_policy_version,
+          privacy_policy_version: user.privacy_policy_version,
         },
       },
       'สำเร็จ',

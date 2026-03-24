@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsBoolean,
+  MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
@@ -31,6 +32,12 @@ export class RegisterDto {
   accepted_terms: boolean;
 
   @IsString()
-  @IsOptional()
-  privacy_policy_version?: string;
+  @IsNotEmpty({ message: 'กรุณาระบุเวอร์ชันข้อกำหนดและเงื่อนไขที่ยอมรับ' })
+  @MaxLength(32)
+  terms_policy_version: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'กรุณาระบุเวอร์ชันนโยบายความเป็นส่วนตัวที่ยอมรับ' })
+  @MaxLength(32)
+  privacy_policy_version: string;
 }
