@@ -254,7 +254,8 @@ export class ActivityService {
     );
 
     const lineCount = items.reduce((sum, i) => sum + i.quantity, 0);
-    const startIndex = (await this.getMaxEntryIndexForActivity(activity.id)) + 1;
+    const startIndex =
+      (await this.getMaxEntryIndexForActivity(activity.id)) + 1;
     const formattedIndices = allocateFormattedActivityEntryIndices(
       startIndex,
       lineCount,
@@ -412,6 +413,11 @@ export class ActivityService {
     const qb = this.activityRepository
       .createQueryBuilder('activity')
       .where('activity.deleted_at IS NULL');
+
+    // ไม่แสดงกิจกรรมที่เป็น draft
+    qb.andWhere('activity.status != :draft', {
+      draft: ActivityStatus.DRAFT,
+    });
 
     // สถานะ: ใช้ enum จริงใน DB + logic "upcoming"
     if (options?.status === 'open') {
