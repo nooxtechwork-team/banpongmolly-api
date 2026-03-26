@@ -16,22 +16,16 @@ export class EntryPopupAdminController {
       return {
         enabled: false,
         content_version: 0,
-        title: null,
-        body: null,
         image_url: null,
-        button_label: null,
-        button_url: null,
+        link_url: null,
         audience: 'all',
       };
     }
     return {
       enabled: row.enabled,
       content_version: row.content_version,
-      title: row.title,
-      body: row.body,
       image_url: row.image_url,
-      button_label: row.button_label,
-      button_url: row.button_url,
+      link_url: row.link_url,
       audience: row.audience,
     };
   }

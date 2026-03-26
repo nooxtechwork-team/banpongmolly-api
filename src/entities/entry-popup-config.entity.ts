@@ -18,20 +18,11 @@ export class EntryPopupConfig {
   @Column({ type: 'int', default: 1 })
   content_version: number;
 
-  @Column({ type: 'varchar', length: 191, nullable: true })
-  title: string | null;
-
-  @Column({ type: 'text', nullable: true })
-  body: string | null;
-
   @Column({ type: 'varchar', length: 512, nullable: true })
   image_url: string | null;
 
-  @Column({ type: 'varchar', length: 191, nullable: true })
-  button_label: string | null;
-
   @Column({ type: 'varchar', length: 512, nullable: true })
-  button_url: string | null;
+  link_url: string | null;
 
   /** all = ทุกคน, guests_only = เฉพาะผู้ที่ยังไม่ล็อกอิน */
   @Column({ type: 'varchar', length: 32, default: 'all' })
