@@ -262,8 +262,8 @@ export class ActivityService {
     );
 
     const leafIds = [...new Set(items.map((i) => i.package_id))];
-    const slugChains =
-      await this.activityPackageService.findSlugChainsByLeafIds(leafIds);
+    const slugPaths =
+      await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(leafIds);
 
     let idxPos = 0;
     const storedLines: {
@@ -277,10 +277,9 @@ export class ActivityService {
     for (const i of items) {
       for (let k = 0; k < i.quantity; k++) {
         const idxStr = formattedIndices[idxPos++]!;
-        const chain = slugChains.get(i.package_id);
+        const slugPath = slugPaths.get(i.package_id);
         const entry_code = buildActivityRegistrationEntryCode(
-          chain?.parentSlug ?? null,
-          chain?.leafSlug ?? '',
+          slugPath ?? null,
           idxStr,
         );
         storedLines.push({

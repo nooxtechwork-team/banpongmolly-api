@@ -78,6 +78,54 @@ export class ActivityPackageService {
     return map;
   }
 
+  /**
+   * คืน slug path สำหรับทำ entry_code โดย "ตัด layer แรกออก"
+   * เช่น root/normal/a/a1 => normal-a-a1
+   */
+  async findSlugPathFromLayer2ByLeafIds(
+    leafIds: number[],
+  ): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    if (!leafIds.length) return out;
+
+    const unique = [...new Set(leafIds)];
+    const visited = new Map<number, ActivityPackage>();
+    let frontier = unique;
+
+    // Load all ancestors needed for requested leaves.
+    while (frontier.length) {
+      const rows = await this.packageRepository.find({
+        where: { id: In(frontier), deleted_at: IsNull() },
+      });
+      const next: number[] = [];
+      for (const row of rows) {
+        if (visited.has(row.id)) continue;
+        visited.set(row.id, row);
+        if (row.parent_id != null && !visited.has(row.parent_id)) {
+          next.push(row.parent_id);
+        }
+      }
+      frontier = [...new Set(next)];
+    }
+
+    for (const leafId of unique) {
+      const path: string[] = [];
+      let cur = visited.get(leafId);
+      while (cur) {
+        path.push(cur.slug);
+        if (cur.parent_id == null) break;
+        cur = visited.get(cur.parent_id);
+      }
+      if (!path.length) continue;
+      const topToLeaf = path.reverse();
+      const fromLayer2 = topToLeaf.slice(1).filter(Boolean);
+      const slugPath = (fromLayer2.length ? fromLayer2 : topToLeaf).join('-');
+      out.set(leafId, slugPath);
+    }
+
+    return out;
+  }
+
   async findAll(): Promise<ActivityPackageWithPrice[]> {
     const packages = await this.packageRepository.find({
       where: { deleted_at: IsNull() },

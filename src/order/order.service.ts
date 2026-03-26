@@ -15,8 +15,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 
-type PackageSlugChain = { parentSlug: string | null; leafSlug: string };
-
 @Injectable()
 export class OrderService {
   constructor(
@@ -34,36 +32,85 @@ export class OrderService {
     private readonly mailService: MailService,
   ) {}
 
-  private async loadPackageSlugChainsByLeafIds(
+  private async loadPackageSlugPathFromLayer2ByLeafIds(
     leafIds: number[],
-  ): Promise<Map<number, PackageSlugChain>> {
-    const map = new Map<number, PackageSlugChain>();
-    if (!leafIds.length) return map;
+  ): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    if (!leafIds.length) return out;
     const unique = [...new Set(leafIds)];
-    const leaves = await this.activityPackageRepository.find({
-      where: { id: In(unique), deleted_at: IsNull() },
-    });
-    const parentIds = [
-      ...new Set(
-        leaves
-          .map((l) => l.parent_id)
-          .filter((id): id is number => id != null && !Number.isNaN(id)),
-      ),
-    ];
-    const parents = parentIds.length
-      ? await this.activityPackageRepository.find({
-          where: { id: In(parentIds), deleted_at: IsNull() },
-        })
-      : [];
-    const parentById = new Map(parents.map((p) => [p.id, p]));
-    for (const leaf of leaves) {
-      const pslug =
-        leaf.parent_id != null
-          ? parentById.get(leaf.parent_id)?.slug ?? null
-          : null;
-      map.set(leaf.id, { parentSlug: pslug, leafSlug: leaf.slug });
+    const visited = new Map<number, ActivityPackage>();
+    let frontier = unique;
+
+    while (frontier.length) {
+      const rows = await this.activityPackageRepository.find({
+        where: { id: In(frontier), deleted_at: IsNull() },
+      });
+      const next: number[] = [];
+      for (const row of rows) {
+        if (visited.has(row.id)) continue;
+        visited.set(row.id, row);
+        if (row.parent_id != null && !visited.has(row.parent_id)) {
+          next.push(row.parent_id);
+        }
+      }
+      frontier = [...new Set(next)];
     }
-    return map;
+
+    for (const leafId of unique) {
+      const path: string[] = [];
+      let cur = visited.get(leafId);
+      while (cur) {
+        path.push(cur.slug);
+        if (cur.parent_id == null) break;
+        cur = visited.get(cur.parent_id);
+      }
+      if (!path.length) continue;
+      const topToLeaf = path.reverse();
+      const fromLayer2 = topToLeaf.slice(1).filter(Boolean);
+      const slugPath = (fromLayer2.length ? fromLayer2 : topToLeaf).join('-');
+      out.set(leafId, slugPath);
+    }
+
+    return out;
+  }
+
+  private async loadPackageNamePathByLeafIds(
+    leafIds: number[],
+  ): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    if (!leafIds.length) return out;
+    const unique = [...new Set(leafIds)];
+    const visited = new Map<number, ActivityPackage>();
+    let frontier = unique;
+
+    while (frontier.length) {
+      const rows = await this.activityPackageRepository.find({
+        where: { id: In(frontier), deleted_at: IsNull() },
+      });
+      const next: number[] = [];
+      for (const row of rows) {
+        if (visited.has(row.id)) continue;
+        visited.set(row.id, row);
+        if (row.parent_id != null && !visited.has(row.parent_id)) {
+          next.push(row.parent_id);
+        }
+      }
+      frontier = [...new Set(next)];
+    }
+
+    for (const leafId of unique) {
+      const path: string[] = [];
+      let cur = visited.get(leafId);
+      while (cur) {
+        path.push(cur.name);
+        if (cur.parent_id == null) break;
+        cur = visited.get(cur.parent_id);
+      }
+      if (!path.length) continue;
+      out.set(leafId, path.reverse().join(' / '));
+    }
+
+    return out;
   }
 
   async createActivityRegistrationOrder(params: {
@@ -345,13 +392,16 @@ export class OrderService {
             const packageNameById = new Map<number, string>(
               (packages || []).map((p) => [p.id, p.name]),
             );
+            const packagePathById =
+              await this.loadPackageNamePathByLeafIds(packageIds);
 
-            const slugChains =
-              await this.loadPackageSlugChainsByLeafIds(packageIds);
+            const slugPaths =
+              await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
 
             entries = parsed.map((e: any) => {
               const packageId = Number(e.package_id);
               const packageName =
+                packagePathById.get(packageId) ??
                 packageNameById.get(packageId) ??
                 `ค่าสมัครแพ็กเกจ #${packageId}`;
               const idxRaw = e.index;
@@ -359,20 +409,13 @@ export class OrderService {
                 idxRaw !== undefined && idxRaw !== null && idxRaw !== ''
                   ? String(idxRaw)
                   : '';
-              const storedCode =
-                e.entry_code != null && String(e.entry_code).trim() !== ''
-                  ? String(e.entry_code).trim()
-                  : '';
-              const chain = slugChains.get(packageId);
+              const slugPath = slugPaths.get(packageId);
               const entry_code =
-                storedCode ||
-                (chain
-                  ? buildActivityRegistrationEntryCode(
-                      chain.parentSlug,
-                      chain.leafSlug,
-                      idxStr || '0000',
-                    )
-                  : undefined);
+                slugPath
+                  ? buildActivityRegistrationEntryCode(slugPath, idxStr || '0000')
+                  : e.entry_code != null && String(e.entry_code).trim() !== ''
+                    ? String(e.entry_code).trim()
+                    : undefined;
               return {
                 ...(idxStr ? { index: idxStr } : {}),
                 ...(entry_code ? { entry_code } : {}),
@@ -578,33 +621,30 @@ export class OrderService {
           const packageNameById = new Map<number, string>(
             (packages || []).map((p) => [p.id, p.name]),
           );
+          const packagePathById =
+            await this.loadPackageNamePathByLeafIds(packageIds);
 
-          const slugChains =
-            await this.loadPackageSlugChainsByLeafIds(packageIds);
+          const slugPaths =
+            await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
 
           entries = parsed.map((e: any) => {
             const packageId = Number(e.package_id);
             const packageName =
-              packageNameById.get(packageId) ?? `ค่าสมัครแพ็กเกจ #${packageId}`;
+              packagePathById.get(packageId) ??
+              packageNameById.get(packageId) ??
+              `ค่าสมัครแพ็กเกจ #${packageId}`;
             const idxRaw = e.index;
             const idxStr =
               idxRaw !== undefined && idxRaw !== null && idxRaw !== ''
                 ? String(idxRaw)
                 : '';
-            const storedCode =
-              e.entry_code != null && String(e.entry_code).trim() !== ''
-                ? String(e.entry_code).trim()
-                : '';
-            const chain = slugChains.get(packageId);
+            const slugPath = slugPaths.get(packageId);
             const entry_code =
-              storedCode ||
-              (chain
-                ? buildActivityRegistrationEntryCode(
-                    chain.parentSlug,
-                    chain.leafSlug,
-                    idxStr || '0000',
-                  )
-                : undefined);
+              slugPath
+                ? buildActivityRegistrationEntryCode(slugPath, idxStr || '0000')
+                : e.entry_code != null && String(e.entry_code).trim() !== ''
+                  ? String(e.entry_code).trim()
+                  : undefined;
             return {
               ...(idxStr ? { index: idxStr } : {}),
               ...(entry_code ? { entry_code } : {}),
@@ -941,8 +981,9 @@ export class OrderService {
       await page.setContent(html, { waitUntil: 'networkidle0' });
       const pdfBuffer = await page.pdf({
         format: 'A4',
+        preferCSSPageSize: true,
         printBackground: true,
-        margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
+        margin: { top: '0', bottom: '0', left: '0', right: '0' },
       });
       return pdfBuffer;
     } finally {

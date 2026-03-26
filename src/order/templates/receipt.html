@@ -4,6 +4,13 @@
     <meta charset="utf-8" />
     <title>Receipt</title>
     <style>
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+      }
       body {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
           sans-serif;
@@ -11,17 +18,17 @@
         color: #111827;
         padding: 0;
         margin: 0;
-        background-color: #f3f4f6;
+        background-color: #ffffff;
       }
       .page {
-        width: 100%;
-        max-width: 800px;
-        margin: 0 auto;
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0;
         background-color: #ffffff;
-        border: 1px solid #e5e7eb;
+        padding: 10mm 12mm 8mm;
       }
       .header {
-        padding: 20px 28px 16px;
+        padding: 10px 4px 12px;
         border-bottom: 3px solid #e5e7eb;
         display: flex;
         justify-content: space-between;
@@ -36,7 +43,7 @@
         color: #e6ba09; /* golden accent */
       }
       .invoice-banner {
-        margin: 0 28px;
+        margin: 0 4px;
         margin-top: 12px;
         padding: 10px 12px;
         background: linear-gradient(90deg, #bf9a04, #d2ad04);
@@ -48,7 +55,7 @@
         font-weight: 700;
       }
       .section {
-        margin: 16px 28px 0;
+        margin: 16px 4px 0;
         font-size: 11px;
       }
       .section-box {
@@ -109,7 +116,7 @@
         color: #f97316;
       }
       .footer {
-        margin: 22px 28px 14px;
+        margin: 22px 4px 4px;
         font-size: 10px;
         text-align: center;
         color: #6b7280;
