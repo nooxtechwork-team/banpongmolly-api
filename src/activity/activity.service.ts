@@ -407,6 +407,7 @@ export class ActivityService {
       status?: 'open' | 'upcoming' | 'finished';
       sort?: 'upcoming' | 'latest' | 'oldest';
       province_id?: number;
+      sponsor_only?: boolean;
     },
   ): Promise<{ items: Activity[]; total: number }> {
     const qb = this.activityRepository
@@ -442,6 +443,17 @@ export class ActivityService {
       qb.andWhere('activity.province_id = :province_id', {
         province_id: options.province_id,
       });
+    }
+
+    // เฉพาะกิจกรรมที่ผูก sponsor package อย่างน้อย 1 รายการ
+    if (options?.sponsor_only) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM activity_sponsor_packages asp
+          WHERE asp.activity_id = activity.id
+        )`,
+      );
     }
 
     // Search ตามชื่อ / สถานที่

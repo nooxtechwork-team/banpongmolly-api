@@ -17,6 +17,8 @@ import { PaymentsAdminController } from './payments-admin.controller';
 import { DashboardAdminController } from './dashboard-admin.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { AdminOrderController } from './admin-order.controller';
+import { CheckOutService } from './check-out.service';
+import { CheckOutController } from './check-out.controller';
 
 @Module({
   imports: [
@@ -29,7 +31,13 @@ import { AdminOrderController } from './admin-order.controller';
     ]),
     AuditLogModule,
   ],
-  providers: [OrderService, ApplicantsService, CheckInService, CheckInGateway],
+  providers: [
+    OrderService,
+    ApplicantsService,
+    CheckInService,
+    CheckOutService,
+    CheckInGateway,
+  ],
   controllers: [
     OrderController,
     MyOrderController,
@@ -38,6 +46,7 @@ import { AdminOrderController } from './admin-order.controller';
     PaymentsAdminController,
     AdminOrderController,
     DashboardAdminController,
+    CheckOutController,
   ],
   exports: [OrderService],
 })

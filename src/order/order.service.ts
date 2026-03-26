@@ -410,12 +410,10 @@ export class OrderService {
                   ? String(idxRaw)
                   : '';
               const slugPath = slugPaths.get(packageId);
-              const entry_code =
-                slugPath
-                  ? buildActivityRegistrationEntryCode(slugPath, idxStr || '0000')
-                  : e.entry_code != null && String(e.entry_code).trim() !== ''
-                    ? String(e.entry_code).trim()
-                    : undefined;
+              const entry_code = buildActivityRegistrationEntryCode(
+                slugPath ?? null,
+                idxStr || '0000',
+              );
               return {
                 ...(idxStr ? { index: idxStr } : {}),
                 ...(entry_code ? { entry_code } : {}),
@@ -639,12 +637,10 @@ export class OrderService {
                 ? String(idxRaw)
                 : '';
             const slugPath = slugPaths.get(packageId);
-            const entry_code =
-              slugPath
-                ? buildActivityRegistrationEntryCode(slugPath, idxStr || '0000')
-                : e.entry_code != null && String(e.entry_code).trim() !== ''
-                  ? String(e.entry_code).trim()
-                  : undefined;
+            const entry_code = buildActivityRegistrationEntryCode(
+              slugPath ?? null,
+              idxStr || '0000',
+            );
             return {
               ...(idxStr ? { index: idxStr } : {}),
               ...(entry_code ? { entry_code } : {}),
@@ -900,7 +896,9 @@ export class OrderService {
           const code =
             e.entry_code != null && String(e.entry_code).trim() !== ''
               ? String(e.entry_code).trim()
-              : e.index !== undefined && e.index !== null && String(e.index) !== ''
+              : e.index !== undefined &&
+                  e.index !== null &&
+                  String(e.index) !== ''
                 ? String(e.index)
                 : '';
           const prefix = code ? `[${code}] ` : '';

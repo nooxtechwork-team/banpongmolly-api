@@ -1,0 +1,355 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
+import { ActivityRegistration } from '../entities/activity-registration.entity';
+import { Activity } from '../entities/activity.entity';
+import { Order, OrderStatus, OrderType } from '../entities/order.entity';
+import { ActivityPackage } from '../entities/activity-package.entity';
+import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
+
+type EntryJsonRow = {
+  index?: string;
+  entry_code?: string;
+  package_id?: number;
+  quantity?: number;
+  unit_price?: number;
+  line_total?: number;
+  checked_out_at?: string | null;
+  checked_out_by_user_id?: number | null;
+  checked_out_by_name?: string | null;
+};
+
+export interface CheckoutActivitySummary {
+  activity_id: number;
+  activity_title: string;
+  total_items: number;
+  checked_out_items: number;
+  pending_items: number;
+}
+
+export interface CheckoutItemRow {
+  registration_id: number;
+  registration_no: string;
+  order_id: number;
+  order_no: string;
+  applicant_name: string;
+  farm_name: string | null;
+  entry_index: string;
+  entry_code: string;
+  package_name: string;
+  amount: number;
+  checked_out: boolean;
+  checked_out_at: string | null;
+  checked_out_by_name: string | null;
+}
+
+@Injectable()
+export class CheckOutService {
+  constructor(
+    @InjectRepository(ActivityRegistration)
+    private readonly registrationRepository: Repository<ActivityRegistration>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    @InjectRepository(Activity)
+    private readonly activityRepository: Repository<Activity>,
+    @InjectRepository(ActivityPackage)
+    private readonly activityPackageRepository: Repository<ActivityPackage>,
+  ) {}
+
+  private parseEntries(raw: string): EntryJsonRow[] {
+    try {
+      const parsed = JSON.parse(raw || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async buildPackagePathMap(packageIds: number[]): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    if (!packageIds.length) return out;
+    const unique = [...new Set(packageIds)];
+    const visited = new Map<number, ActivityPackage>();
+    let frontier = unique;
+
+    while (frontier.length) {
+      const rows = await this.activityPackageRepository.find({
+        where: { id: In(frontier) },
+      });
+      const next: number[] = [];
+      for (const row of rows) {
+        if (visited.has(row.id)) continue;
+        visited.set(row.id, row);
+        if (row.parent_id != null && !visited.has(row.parent_id)) {
+          next.push(row.parent_id);
+        }
+      }
+      frontier = [...new Set(next)];
+    }
+
+    for (const leafId of unique) {
+      const names: string[] = [];
+      let cur = visited.get(leafId);
+      while (cur) {
+        names.push(cur.name);
+        if (cur.parent_id == null) break;
+        cur = visited.get(cur.parent_id);
+      }
+      if (names.length) out.set(leafId, names.reverse().join(' / '));
+    }
+    return out;
+  }
+
+  private async buildPackageSlugPathFromLayer2Map(
+    packageIds: number[],
+  ): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    if (!packageIds.length) return out;
+    const unique = [...new Set(packageIds)];
+    const visited = new Map<number, ActivityPackage>();
+    let frontier = unique;
+
+    while (frontier.length) {
+      const rows = await this.activityPackageRepository.find({
+        where: { id: In(frontier) },
+      });
+      const next: number[] = [];
+      for (const row of rows) {
+        if (visited.has(row.id)) continue;
+        visited.set(row.id, row);
+        if (row.parent_id != null && !visited.has(row.parent_id)) {
+          next.push(row.parent_id);
+        }
+      }
+      frontier = [...new Set(next)];
+    }
+
+    for (const leafId of unique) {
+      const slugs: string[] = [];
+      let cur = visited.get(leafId);
+      while (cur) {
+        slugs.push(cur.slug);
+        if (cur.parent_id == null) break;
+        cur = visited.get(cur.parent_id);
+      }
+      if (!slugs.length) continue;
+      const topToLeaf = slugs.reverse();
+      const fromLayer2 = topToLeaf.slice(1).filter(Boolean);
+      out.set(leafId, (fromLayer2.length ? fromLayer2 : topToLeaf).join('-'));
+    }
+    return out;
+  }
+
+  async getActivitiesSummary(
+    page: number = 1,
+    limit: number = 20,
+  ): Promise<{ items: CheckoutActivitySummary[]; total: number }> {
+    const rows = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(
+        Order,
+        'ord',
+        'ord.refer_id = reg.id AND ord.type = :type AND ord.status = :status',
+        { type: OrderType.ACTIVITY_REGISTRATION, status: OrderStatus.PAID },
+      )
+      .innerJoin(Activity, 'act', 'act.id = reg.activity_id')
+      .select(['reg.activity_id AS activity_id', 'act.title AS activity_title', 'reg.entries_json AS entries_json'])
+      .orderBy('act.title', 'ASC')
+      .getRawMany();
+
+    const map = new Map<number, CheckoutActivitySummary>();
+    for (const r of rows) {
+      const activityId = Number(r.activity_id);
+      if (!map.has(activityId)) {
+        map.set(activityId, {
+          activity_id: activityId,
+          activity_title: String(r.activity_title ?? ''),
+          total_items: 0,
+          checked_out_items: 0,
+          pending_items: 0,
+        });
+      }
+      const summary = map.get(activityId)!;
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      for (const e of entries) {
+        const qty = Math.max(1, Number(e.quantity) || 1);
+        summary.total_items += qty;
+        if (e.checked_out_at) summary.checked_out_items += qty;
+      }
+      summary.pending_items = Math.max(0, summary.total_items - summary.checked_out_items);
+    }
+    const all = Array.from(map.values());
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const start = (safePage - 1) * safeLimit;
+    return {
+      items: all.slice(start, start + safeLimit),
+      total: all.length,
+    };
+  }
+
+  async getActivityItems(
+    activityId: number,
+    filters?: { status?: 'all' | 'checked_out' | 'pending'; search?: string; farm_name?: string },
+  ): Promise<{
+    activity: { id: number; title: string } | null;
+    items: CheckoutItemRow[];
+    totals: { total_items: number; checked_out_items: number; pending_items: number };
+  }> {
+    const activity = await this.activityRepository.findOne({ where: { id: activityId } });
+    if (!activity) throw new NotFoundException('ไม่พบกิจกรรม');
+
+    const rows = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(
+        Order,
+        'ord',
+        'ord.refer_id = reg.id AND ord.type = :type AND ord.status = :status',
+        { type: OrderType.ACTIVITY_REGISTRATION, status: OrderStatus.PAID },
+      )
+      .where('reg.activity_id = :activityId', { activityId })
+      .select([
+        'reg.id AS registration_id',
+        'reg.registration_no AS registration_no',
+        'reg.applicant_name AS applicant_name',
+        'reg.farm_name AS farm_name',
+        'reg.entries_json AS entries_json',
+        'ord.id AS order_id',
+        'ord.order_no AS order_no',
+      ])
+      .orderBy('ord.created_at', 'DESC')
+      .addOrderBy('reg.id', 'DESC')
+      .getRawMany();
+
+    const packageIds: number[] = [];
+    for (const r of rows) {
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      for (const e of entries) {
+        const id = Number(e.package_id);
+        if (!Number.isNaN(id)) packageIds.push(id);
+      }
+    }
+    const packagePathMap = await this.buildPackagePathMap(packageIds);
+    const packageSlugPathMap =
+      await this.buildPackageSlugPathFromLayer2Map(packageIds);
+
+    let items: CheckoutItemRow[] = [];
+    for (const r of rows) {
+      const registrationId = Number(r.registration_id);
+      const orderId = Number(r.order_id);
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      items.push(
+        ...entries.map((e) => {
+          const packageId = Number(e.package_id);
+          const idx = e.index != null && String(e.index).trim() !== '' ? String(e.index).trim() : '-';
+          const code = buildActivityRegistrationEntryCode(
+            packageSlugPathMap.get(packageId) ?? null,
+            idx && idx !== '-' ? idx : '0000',
+          );
+          return {
+            registration_id: registrationId,
+            registration_no: String(r.registration_no ?? ''),
+            order_id: orderId,
+            order_no: String(r.order_no ?? ''),
+            applicant_name: String(r.applicant_name ?? ''),
+            farm_name: r.farm_name ? String(r.farm_name) : null,
+            entry_index: idx,
+            entry_code: code,
+            package_name:
+              packagePathMap.get(packageId) ||
+              `แพ็กเกจ #${Number.isNaN(packageId) ? '-' : packageId}`,
+            amount: Number(e.line_total) || 0,
+            checked_out: !!e.checked_out_at,
+            checked_out_at: e.checked_out_at ? String(e.checked_out_at) : null,
+            checked_out_by_name:
+              e.checked_out_by_name != null ? String(e.checked_out_by_name) : null,
+          } satisfies CheckoutItemRow;
+        }),
+      );
+    }
+
+    const q = (filters?.search || '').trim().toLowerCase();
+    if (q) {
+      items = items.filter((x) =>
+        x.order_no.toLowerCase().includes(q) ||
+        x.registration_no.toLowerCase().includes(q) ||
+        x.applicant_name.toLowerCase().includes(q) ||
+        (x.farm_name || '').toLowerCase().includes(q) ||
+        x.entry_code.toLowerCase().includes(q) ||
+        x.package_name.toLowerCase().includes(q),
+      );
+    }
+    if (filters?.farm_name?.trim()) {
+      const farm = filters.farm_name.trim().toLowerCase();
+      items = items.filter((x) => (x.farm_name || '').toLowerCase().includes(farm));
+    }
+    if (filters?.status === 'checked_out') {
+      items = items.filter((x) => x.checked_out);
+    } else if (filters?.status === 'pending') {
+      items = items.filter((x) => !x.checked_out);
+    }
+
+    const checkedOut = items.filter((x) => x.checked_out).length;
+    return {
+      activity: { id: activity.id, title: activity.title },
+      items,
+      totals: {
+        total_items: items.length,
+        checked_out_items: checkedOut,
+        pending_items: Math.max(0, items.length - checkedOut),
+      },
+    };
+  }
+
+  async setItemCheckout(params: {
+    registration_id: number;
+    entry_index: string;
+    checked_out: boolean;
+    actor_user_id?: number | null;
+    actor_name?: string | null;
+  }): Promise<{ updated: true }> {
+    const registration = await this.registrationRepository.findOne({
+      where: { id: params.registration_id },
+    });
+    if (!registration) throw new NotFoundException('ไม่พบรายการสมัคร');
+
+    const targetIndex = (params.entry_index || '').trim();
+    if (!targetIndex) throw new BadRequestException('กรุณาระบุ entry_index');
+
+    const entries = this.parseEntries(registration.entries_json);
+    let touched = false;
+    const nowIso = new Date().toISOString();
+    const actorName = (params.actor_name || '').trim() || null;
+    const actorId =
+      typeof params.actor_user_id === 'number' && Number.isFinite(params.actor_user_id)
+        ? params.actor_user_id
+        : null;
+
+    const next = entries.map((e) => {
+      const idx = e.index != null ? String(e.index).trim() : '';
+      if (idx !== targetIndex) return e;
+      touched = true;
+      if (params.checked_out) {
+        return {
+          ...e,
+          checked_out_at: nowIso,
+          checked_out_by_user_id: actorId,
+          checked_out_by_name: actorName,
+        };
+      }
+      return {
+        ...e,
+        checked_out_at: null,
+        checked_out_by_user_id: null,
+        checked_out_by_name: null,
+      };
+    });
+
+    if (!touched) throw new NotFoundException('ไม่พบ item ตาม entry_index ที่ระบุ');
+
+    registration.entries_json = JSON.stringify(next);
+    await this.registrationRepository.save(registration);
+    return { updated: true };
+  }
+}
+

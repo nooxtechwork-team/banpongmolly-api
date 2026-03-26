@@ -32,6 +32,7 @@ export class PublicActivityController {
     @Query('search') search?: string,
     @Query('sort') sort?: 'upcoming' | 'latest' | 'oldest',
     @Query('province_id') provinceId?: string,
+    @Query('sponsor_only') sponsorOnly?: string,
   ): Promise<{ items: Activity[]; total: number } | Activity[]> {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
     const limitNum = limit
@@ -43,11 +44,15 @@ export class PublicActivityController {
         ? parseInt(provinceId, 10)
         : undefined;
 
+    const sponsor_only =
+      sponsorOnly === 'true' || sponsorOnly === '1' || sponsorOnly === 'yes';
+
     return this.activityService.findPublicPaginated(pageNum, limitNum, {
       status,
       search,
       sort,
       province_id,
+      sponsor_only,
     });
   }
 
