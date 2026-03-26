@@ -28,6 +28,7 @@ import { AcceptPoliciesDto } from './dto/accept-policies.dto';
 import { ResponseInterceptor } from '../common/interceptors/response.interceptor';
 import { AuthGuard } from '@nestjs/passport';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { User } from '../entities/user.entity';
 import { ConfigService } from '@nestjs/config';
 import { LoginLogService } from '../login-log/login-log.service';
@@ -105,7 +106,7 @@ export class AuthController {
 
   /** เริ่มต้น OAuth: redirect ไปหน้า login Google (ทำทุกอย่างฝั่ง API) */
   @Get('google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   async googleOAuthStart() {
     // Guard จะ redirect ไป Google ให้
   }

@@ -10,6 +10,7 @@ import { User } from '../entities/user.entity';
 import { UserAuth } from '../entities/user-auth.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { LegalModule } from '../legal/legal.module';
 
 @Module({
@@ -30,7 +31,7 @@ import { LegalModule } from '../legal/legal.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, GoogleStrategy],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, GoogleAuthGuard],
   exports: [AuthService],
 })
 export class AuthModule {}
