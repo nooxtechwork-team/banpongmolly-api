@@ -24,6 +24,7 @@ import { PaymentConfig } from '../entities/payment-config.entity';
 import { News } from '../entities/news.entity';
 import { LegalPolicy } from '../entities/legal-policy.entity';
 import { PolicyAcceptance } from '../entities/policy-acceptance.entity';
+import { EntryPopupConfig } from '../entities/entry-popup-config.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -59,6 +60,7 @@ export const getDatabaseConfig = (
     PaymentConfig,
     LegalPolicy,
     PolicyAcceptance,
+    EntryPopupConfig,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',
