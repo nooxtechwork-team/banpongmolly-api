@@ -16,6 +16,7 @@ import { CheckInGateway } from './check-in.gateway';
 import { PaymentsAdminController } from './payments-admin.controller';
 import { DashboardAdminController } from './dashboard-admin.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { AuthModule } from '../auth/auth.module';
 import { AdminOrderController } from './admin-order.controller';
 import { CheckOutService } from './check-out.service';
 import { CheckOutController } from './check-out.controller';
@@ -30,6 +31,7 @@ import { CheckOutController } from './check-out.controller';
       ActivityPackage,
     ]),
     AuditLogModule,
+    AuthModule,
   ],
   providers: [
     OrderService,

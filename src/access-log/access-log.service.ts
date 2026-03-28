@@ -56,8 +56,19 @@ export class AccessLogService {
     items: AccessLog[];
     total: number;
   }> {
-    const page = Math.max(1, params.page ?? 1);
-    const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+    const rawPage = params.page ?? 1;
+    const rawLimit = params.limit ?? 20;
+    const page = Math.max(
+      1,
+      typeof rawPage === 'number' && Number.isFinite(rawPage) ? rawPage : 1,
+    );
+    const limit = Math.min(
+      100,
+      Math.max(
+        1,
+        typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? rawLimit : 20,
+      ),
+    );
 
     const qb = this.repo
       .createQueryBuilder('log')
@@ -66,10 +77,12 @@ export class AccessLogService {
     if (params.method) {
       qb.andWhere('log.method = :method', { method: params.method });
     }
-    if (params.status_code) {
-      qb.andWhere('log.status_code = :status', { status: params.status_code });
+    if (params.status_code != null && Number.isFinite(params.status_code)) {
+      qb.andWhere('log.status_code = :status', {
+        status: params.status_code,
+      });
     }
-    if (params.user_id) {
+    if (params.user_id != null && Number.isFinite(params.user_id)) {
       qb.andWhere('log.user_id = :user_id', { user_id: params.user_id });
     }
     if (params.path) {
@@ -82,14 +95,11 @@ export class AccessLogService {
       qb.andWhere('log.created_at <= :to', { to: params.to });
     }
 
-    const [items, total] = await Promise.all([
-      qb
-        .clone()
-        .skip((page - 1) * limit)
-        .take(limit)
-        .getMany(),
-      qb.clone().getCount(),
-    ]);
+    // getManyAndCount: total = จำนวนแถวที่ตรงตัวกรองทั้งหมด (ไม่จำกัด limit) — สอดคล้องกับรายการในหน้า
+    const [items, total] = await qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
 
     return { items, total };
   }

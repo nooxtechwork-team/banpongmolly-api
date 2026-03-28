@@ -21,11 +21,23 @@ export class AccessLogController {
     @Query('to') to?: string,
   ): Promise<{ items: AccessLog[]; total: number }> {
     return this.accessLogService.findList({
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page:
+        page !== undefined && page !== ''
+          ? Number.parseInt(String(page), 10)
+          : undefined,
+      limit:
+        limit !== undefined && limit !== ''
+          ? Number.parseInt(String(limit), 10)
+          : undefined,
       method: method || undefined,
-      status_code: status_code ? parseInt(status_code, 10) : undefined,
-      user_id: user_id ? parseInt(user_id, 10) : undefined,
+      status_code:
+        status_code !== undefined && status_code !== ''
+          ? Number.parseInt(String(status_code), 10)
+          : undefined,
+      user_id:
+        user_id !== undefined && user_id !== ''
+          ? Number.parseInt(String(user_id), 10)
+          : undefined,
       path: path || undefined,
       from,
       to,

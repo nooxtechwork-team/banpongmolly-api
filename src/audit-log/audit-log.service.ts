@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   AuditLog,
   type AuditAction,
@@ -96,50 +96,51 @@ export class AuditLogService {
       return qb;
     };
 
-    const total = await applyFilters(
-      this.repo.createQueryBuilder('log'),
-    ).getCount();
-
-    const qb = applyFilters(
-      this.repo
-        .createQueryBuilder('log')
-        .leftJoin(User, 'user', 'user.id = log.checker_user_id')
-        .select([
-          'log.id AS id',
-          'log.action AS action',
-          'log.entity_type AS entity_type',
-          'log.entity_id AS entity_id',
-          'log.checker_user_id AS checker_user_id',
-          'log.checker_name AS checker_name',
-          'log.checked_at AS checked_at',
-          'log.metadata AS metadata',
-          'log.created_at AS created_at',
-          'user.email AS checker_email',
-          'user.fullname AS user_fullname',
-          'user.role AS checker_role',
-        ])
-        .orderBy('log.created_at', 'DESC'),
+    // ไม่ใช้ leftJoin + getRawMany — ใน TypeORM บางเคส LIMIT/OFFSET ไม่ถูกใส่ใน SQL ทำให้ได้ทุกแถว
+    const listQb = applyFilters(
+      this.repo.createQueryBuilder('log').orderBy('log.created_at', 'DESC'),
     );
 
-    const raws = await qb
+    const [entities, total] = await listQb
       .skip((page - 1) * limit)
       .take(limit)
-      .getRawMany();
+      .getManyAndCount();
 
-    const items = raws.map((r: any) => ({
-      id: r.id as number,
-      action: r.action as AuditAction,
-      entity_type: r.entity_type as AuditEntityType,
-      entity_id: r.entity_id as number,
-      checker_user_id: (r.checker_user_id as number) ?? null,
-      checker_name:
-        (r.user_fullname as string) ?? (r.checker_name as string) ?? null,
-      checker_email: (r.checker_email as string) ?? null,
-      checker_role: (r.checker_role as string) ?? null,
-      checked_at: (r.checked_at as Date) ?? null,
-      metadata: (r.metadata as Record<string, unknown>) ?? null,
-      created_at: r.created_at as Date,
-    }));
+    const checkerIds = [
+      ...new Set(
+        entities
+          .map((e) => e.checker_user_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const users =
+      checkerIds.length > 0
+        ? await this.userRepo.find({
+            where: { id: In(checkerIds) },
+            select: ['id', 'email', 'fullname', 'role'],
+          })
+        : [];
+    const userById = new Map(users.map((u) => [u.id, u]));
+
+    const items = entities.map((log) => {
+      const u =
+        log.checker_user_id != null
+          ? userById.get(log.checker_user_id)
+          : undefined;
+      return {
+        id: log.id,
+        action: log.action,
+        entity_type: log.entity_type,
+        entity_id: log.entity_id,
+        checker_user_id: log.checker_user_id,
+        checker_name: u?.fullname ?? log.checker_name ?? null,
+        checker_email: u?.email ?? null,
+        checker_role: u?.role != null ? String(u.role) : null,
+        checked_at: log.checked_at,
+        metadata: log.metadata,
+        created_at: log.created_at,
+      };
+    });
 
     return { items, total };
   }

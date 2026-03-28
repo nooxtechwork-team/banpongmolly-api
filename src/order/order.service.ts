@@ -14,6 +14,7 @@ import * as puppeteer from 'puppeteer';
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
+import { CheckInGateway } from './check-in.gateway';
 
 @Injectable()
 export class OrderService {
@@ -30,6 +31,7 @@ export class OrderService {
     private readonly activityPackageRepository: Repository<ActivityPackage>,
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
+    private readonly checkInGateway: CheckInGateway,
   ) {}
 
   private async loadPackageSlugPathFromLayer2ByLeafIds(
@@ -308,6 +310,22 @@ export class OrderService {
     });
 
     return { items: enriched, total };
+  }
+
+  /** จำนวนใบสมัครกิจกรรมที่ชำระแล้วแต่ยังไม่เช็คอิน (สำหรับ badge เมนูตั๋ว) */
+  async countMyPendingTicketCheckIns(user: User): Promise<number> {
+    return this.orderRepository
+      .createQueryBuilder('order')
+      .innerJoin(
+        ActivityRegistration,
+        'reg',
+        'reg.id = order.refer_id',
+      )
+      .where('order.user_id = :userId', { userId: user.id })
+      .andWhere('order.type = :type', { type: OrderType.ACTIVITY_REGISTRATION })
+      .andWhere('order.status = :status', { status: OrderStatus.PAID })
+      .andWhere('reg.checked_in_at IS NULL')
+      .getCount();
   }
 
   /**
@@ -879,6 +897,14 @@ export class OrderService {
     }
 
     const saved = await this.orderRepository.save(order);
+
+    if (
+      status === OrderStatus.PAID &&
+      saved.type === OrderType.ACTIVITY_REGISTRATION &&
+      saved.user_id != null
+    ) {
+      this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+    }
 
     // หลังจากนี้สามารถเรียก sendReceiptEmail(order.id) เพื่อส่งใบเสร็จให้ลูกค้า (ใช้ใน endpoint แยก)
     return saved;
