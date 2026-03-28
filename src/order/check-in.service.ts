@@ -23,7 +23,10 @@ export interface CheckInLookupResult {
 
 export interface CheckInHistoryEntry {
   registration_no: string;
+  order_no: string | null;
   applicant_name: string;
+  applicant_email: string | null;
+  applicant_phone: string | null;
   activity_title: string;
   checked_in_at: string;
 }
@@ -175,44 +178,86 @@ export class CheckInService {
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const safePage = Math.max(1, page);
 
-    const qb = this.registrationRepository
+    const countQb = this.registrationRepository
       .createQueryBuilder('reg')
-      .innerJoin(Activity, 'a', 'a.id = reg.activity_id')
-      .select([
-        'reg.registration_no',
-        'reg.applicant_name',
-        'reg.checked_in_at',
-      ])
-      .addSelect('a.title', 'activity_title')
-      .where('reg.checked_in_at IS NOT NULL')
-      .orderBy('reg.checked_in_at', 'DESC');
+      .where('reg.checked_in_at IS NOT NULL');
 
     if (options?.date_from) {
-      qb.andWhere('reg.checked_in_at >= :date_from', {
+      countQb.andWhere('reg.checked_in_at >= :date_from', {
         date_from: options.date_from,
       });
     }
     if (options?.date_to) {
-      qb.andWhere('reg.checked_in_at <= :date_to', {
+      countQb.andWhere('reg.checked_in_at <= :date_to', {
         date_to: options.date_to,
       });
     }
 
-    const total = await qb.getCount();
-    const raws = await qb
+    const total = await countQb.getCount();
+
+    const listQb = this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(Activity, 'a', 'a.id = reg.activity_id')
+      .leftJoin(
+        Order,
+        'o',
+        'o.refer_id = reg.id AND o.type = :historyOrderType',
+        { historyOrderType: OrderType.ACTIVITY_REGISTRATION },
+      )
+      .select([
+        'reg.registration_no',
+        'reg.applicant_name',
+        'reg.email',
+        'reg.phone',
+        'reg.checked_in_at',
+      ])
+      .addSelect('a.title', 'activity_title')
+      .addSelect('o.order_no', 'order_no')
+      .where('reg.checked_in_at IS NOT NULL')
+      .orderBy('reg.checked_in_at', 'DESC');
+
+    if (options?.date_from) {
+      listQb.andWhere('reg.checked_in_at >= :date_from', {
+        date_from: options.date_from,
+      });
+    }
+    if (options?.date_to) {
+      listQb.andWhere('reg.checked_in_at <= :date_to', {
+        date_to: options.date_to,
+      });
+    }
+
+    const raws = await listQb
       .offset((safePage - 1) * safeLimit)
       .limit(safeLimit)
       .getRawMany();
 
-    const items: CheckInHistoryEntry[] = (raws || []).map((r: any) => ({
-      registration_no: r.reg_registration_no ?? '',
-      applicant_name: r.reg_applicant_name ?? '',
-      activity_title: r.activity_title ?? '',
-      checked_in_at:
-        r.reg_checked_in_at instanceof Date
-          ? r.reg_checked_in_at.toISOString()
-          : String(r.reg_checked_in_at ?? ''),
-    }));
+    const items: CheckInHistoryEntry[] = (raws || []).map((r: any) => {
+      const emailRaw = r.reg_email;
+      const phoneRaw = r.reg_phone;
+      const orderNoRaw = r.order_no;
+      return {
+        registration_no: r.reg_registration_no ?? '',
+        order_no:
+          orderNoRaw != null && String(orderNoRaw).trim() !== ''
+            ? String(orderNoRaw).trim()
+            : null,
+        applicant_name: r.reg_applicant_name ?? '',
+        applicant_email:
+          emailRaw != null && String(emailRaw).trim() !== ''
+            ? String(emailRaw).trim()
+            : null,
+        applicant_phone:
+          phoneRaw != null && String(phoneRaw).trim() !== ''
+            ? String(phoneRaw).trim()
+            : null,
+        activity_title: r.activity_title ?? '',
+        checked_in_at:
+          r.reg_checked_in_at instanceof Date
+            ? r.reg_checked_in_at.toISOString()
+            : String(r.reg_checked_in_at ?? ''),
+      };
+    });
 
     return { items, total };
   }

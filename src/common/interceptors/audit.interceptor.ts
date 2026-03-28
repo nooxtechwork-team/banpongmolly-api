@@ -148,6 +148,18 @@ export class AuditInterceptor implements NestInterceptor {
       }
     }
 
+    if (meta.entity_type === 'check_out') {
+      if (body.entry_index != null && String(body.entry_index).trim() !== '') {
+        base.entry_index = String(body.entry_index).trim();
+      }
+      if (typeof body.checked_out === 'boolean') {
+        base.checked_out = body.checked_out;
+      }
+      if (body.registration_id != null && body.registration_id !== '') {
+        base.registration_id = Number(body.registration_id);
+      }
+    }
+
     return base;
   }
 }

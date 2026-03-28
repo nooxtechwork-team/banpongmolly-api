@@ -19,8 +19,14 @@ export class AuditLogController {
     @Query('to') to?: string,
   ): Promise<{ items: AuditLog[]; total: number }> {
     return this.auditLogService.findList({
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page:
+        page !== undefined && page !== ''
+          ? Number.parseInt(String(page), 10)
+          : undefined,
+      limit:
+        limit !== undefined && limit !== ''
+          ? Number.parseInt(String(limit), 10)
+          : undefined,
       action: action as any,
       entity_type: entity_type as any,
       from,

@@ -16,6 +16,7 @@ export type AuditEntityType =
   | 'payment'
   | 'payment_sponsor'
   | 'check_in'
+  | 'check_out'
   | 'event'
   | 'package'
   | 'user'

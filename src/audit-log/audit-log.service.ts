@@ -62,50 +62,69 @@ export class AuditLogService {
     }[];
     total: number;
   }> {
-    const page = Math.max(1, params.page ?? 1);
-    const limit = Math.min(100, Math.max(1, params.limit ?? 20));
-    const qb = this.repo
-      .createQueryBuilder('log')
-      .leftJoin(User, 'user', 'user.id = log.checker_user_id')
-      .select([
-        'log.id AS id',
-        'log.action AS action',
-        'log.entity_type AS entity_type',
-        'log.entity_id AS entity_id',
-        'log.checker_user_id AS checker_user_id',
-        'log.checker_name AS checker_name',
-        'log.checked_at AS checked_at',
-        'log.metadata AS metadata',
-        'log.created_at AS created_at',
-        'user.email AS checker_email',
-        'user.fullname AS user_fullname',
-        'user.role AS checker_role',
-      ])
-      .orderBy('log.created_at', 'DESC');
+    const rawPage = params.page ?? 1;
+    const rawLimit = params.limit ?? 20;
+    const page = Math.max(
+      1,
+      typeof rawPage === 'number' && Number.isFinite(rawPage) ? rawPage : 1,
+    );
+    const limit = Math.min(
+      100,
+      Math.max(
+        1,
+        typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? rawLimit : 20,
+      ),
+    );
 
-    if (params.action) {
-      qb.andWhere('log.action = :action', { action: params.action });
-    }
-    if (params.entity_type) {
-      qb.andWhere('log.entity_type = :entity_type', {
-        entity_type: params.entity_type,
-      });
-    }
-    if (params.from) {
-      qb.andWhere('log.checked_at >= :from', { from: params.from });
-    }
-    if (params.to) {
-      qb.andWhere('log.checked_at <= :to', { to: params.to });
-    }
+    const applyFilters = (
+      qb: ReturnType<Repository<AuditLog>['createQueryBuilder']>,
+    ) => {
+      if (params.action) {
+        qb.andWhere('log.action = :action', { action: params.action });
+      }
+      if (params.entity_type) {
+        qb.andWhere('log.entity_type = :entity_type', {
+          entity_type: params.entity_type,
+        });
+      }
+      if (params.from) {
+        qb.andWhere('log.checked_at >= :from', { from: params.from });
+      }
+      if (params.to) {
+        qb.andWhere('log.checked_at <= :to', { to: params.to });
+      }
+      return qb;
+    };
 
-    const [raws, total] = await Promise.all([
-      qb
-        .clone()
-        .skip((page - 1) * limit)
-        .take(limit)
-        .getRawMany(),
-      qb.clone().getCount(),
-    ]);
+    const total = await applyFilters(
+      this.repo.createQueryBuilder('log'),
+    ).getCount();
+
+    const qb = applyFilters(
+      this.repo
+        .createQueryBuilder('log')
+        .leftJoin(User, 'user', 'user.id = log.checker_user_id')
+        .select([
+          'log.id AS id',
+          'log.action AS action',
+          'log.entity_type AS entity_type',
+          'log.entity_id AS entity_id',
+          'log.checker_user_id AS checker_user_id',
+          'log.checker_name AS checker_name',
+          'log.checked_at AS checked_at',
+          'log.metadata AS metadata',
+          'log.created_at AS created_at',
+          'user.email AS checker_email',
+          'user.fullname AS user_fullname',
+          'user.role AS checker_role',
+        ])
+        .orderBy('log.created_at', 'DESC'),
+    );
+
+    const raws = await qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getRawMany();
 
     const items = raws.map((r: any) => ({
       id: r.id as number,

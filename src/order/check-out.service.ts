@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -6,6 +10,7 @@ import { Activity } from '../entities/activity.entity';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 type EntryJsonRow = {
   index?: string;
@@ -32,7 +37,10 @@ export interface CheckoutItemRow {
   registration_no: string;
   order_id: number;
   order_no: string;
+  /** ISO: เวลาสร้างคำสั่งซื้อ */
+  order_created_at: string;
   applicant_name: string;
+  applicant_email: string | null;
   farm_name: string | null;
   entry_index: string;
   entry_code: string;
@@ -54,6 +62,7 @@ export class CheckOutService {
     private readonly activityRepository: Repository<Activity>,
     @InjectRepository(ActivityPackage)
     private readonly activityPackageRepository: Repository<ActivityPackage>,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   private parseEntries(raw: string): EntryJsonRow[] {
@@ -65,7 +74,9 @@ export class CheckOutService {
     }
   }
 
-  private async buildPackagePathMap(packageIds: number[]): Promise<Map<number, string>> {
+  private async buildPackagePathMap(
+    packageIds: number[],
+  ): Promise<Map<number, string>> {
     const out = new Map<number, string>();
     if (!packageIds.length) return out;
     const unique = [...new Set(packageIds)];
@@ -153,7 +164,12 @@ export class CheckOutService {
         { type: OrderType.ACTIVITY_REGISTRATION, status: OrderStatus.PAID },
       )
       .innerJoin(Activity, 'act', 'act.id = reg.activity_id')
-      .select(['reg.activity_id AS activity_id', 'act.title AS activity_title', 'reg.entries_json AS entries_json'])
+      .where('reg.checked_in_at IS NOT NULL')
+      .select([
+        'reg.activity_id AS activity_id',
+        'act.title AS activity_title',
+        'reg.entries_json AS entries_json',
+      ])
       .orderBy('act.title', 'ASC')
       .getRawMany();
 
@@ -176,7 +192,10 @@ export class CheckOutService {
         summary.total_items += qty;
         if (e.checked_out_at) summary.checked_out_items += qty;
       }
-      summary.pending_items = Math.max(0, summary.total_items - summary.checked_out_items);
+      summary.pending_items = Math.max(
+        0,
+        summary.total_items - summary.checked_out_items,
+      );
     }
     const all = Array.from(map.values());
     const safePage = Math.max(1, page);
@@ -190,13 +209,23 @@ export class CheckOutService {
 
   async getActivityItems(
     activityId: number,
-    filters?: { status?: 'all' | 'checked_out' | 'pending'; search?: string; farm_name?: string },
+    filters?: {
+      status?: 'all' | 'checked_out' | 'pending';
+      search?: string;
+      farm_name?: string;
+    },
   ): Promise<{
     activity: { id: number; title: string } | null;
     items: CheckoutItemRow[];
-    totals: { total_items: number; checked_out_items: number; pending_items: number };
+    totals: {
+      total_items: number;
+      checked_out_items: number;
+      pending_items: number;
+    };
   }> {
-    const activity = await this.activityRepository.findOne({ where: { id: activityId } });
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId },
+    });
     if (!activity) throw new NotFoundException('ไม่พบกิจกรรม');
 
     const rows = await this.registrationRepository
@@ -208,14 +237,17 @@ export class CheckOutService {
         { type: OrderType.ACTIVITY_REGISTRATION, status: OrderStatus.PAID },
       )
       .where('reg.activity_id = :activityId', { activityId })
+      .andWhere('reg.checked_in_at IS NOT NULL')
       .select([
         'reg.id AS registration_id',
         'reg.registration_no AS registration_no',
         'reg.applicant_name AS applicant_name',
+        'reg.email AS applicant_email',
         'reg.farm_name AS farm_name',
         'reg.entries_json AS entries_json',
         'ord.id AS order_id',
         'ord.order_no AS order_no',
+        'ord.created_at AS order_created_at',
       ])
       .orderBy('ord.created_at', 'DESC')
       .addOrderBy('reg.id', 'DESC')
@@ -237,11 +269,21 @@ export class CheckOutService {
     for (const r of rows) {
       const registrationId = Number(r.registration_id);
       const orderId = Number(r.order_id);
+      const orderCreatedRaw = r.order_created_at;
+      const order_created_at =
+        orderCreatedRaw instanceof Date
+          ? orderCreatedRaw.toISOString()
+          : orderCreatedRaw != null && String(orderCreatedRaw).trim() !== ''
+            ? String(orderCreatedRaw)
+            : '';
       const entries = this.parseEntries(String(r.entries_json ?? '[]'));
       items.push(
         ...entries.map((e) => {
           const packageId = Number(e.package_id);
-          const idx = e.index != null && String(e.index).trim() !== '' ? String(e.index).trim() : '-';
+          const idx =
+            e.index != null && String(e.index).trim() !== ''
+              ? String(e.index).trim()
+              : '-';
           const code = buildActivityRegistrationEntryCode(
             packageSlugPathMap.get(packageId) ?? null,
             idx && idx !== '-' ? idx : '0000',
@@ -251,7 +293,13 @@ export class CheckOutService {
             registration_no: String(r.registration_no ?? ''),
             order_id: orderId,
             order_no: String(r.order_no ?? ''),
+            order_created_at,
             applicant_name: String(r.applicant_name ?? ''),
+            applicant_email:
+              r.applicant_email != null &&
+              String(r.applicant_email).trim() !== ''
+                ? String(r.applicant_email).trim()
+                : null,
             farm_name: r.farm_name ? String(r.farm_name) : null,
             entry_index: idx,
             entry_code: code,
@@ -262,7 +310,9 @@ export class CheckOutService {
             checked_out: !!e.checked_out_at,
             checked_out_at: e.checked_out_at ? String(e.checked_out_at) : null,
             checked_out_by_name:
-              e.checked_out_by_name != null ? String(e.checked_out_by_name) : null,
+              e.checked_out_by_name != null
+                ? String(e.checked_out_by_name)
+                : null,
           } satisfies CheckoutItemRow;
         }),
       );
@@ -270,18 +320,22 @@ export class CheckOutService {
 
     const q = (filters?.search || '').trim().toLowerCase();
     if (q) {
-      items = items.filter((x) =>
-        x.order_no.toLowerCase().includes(q) ||
-        x.registration_no.toLowerCase().includes(q) ||
-        x.applicant_name.toLowerCase().includes(q) ||
-        (x.farm_name || '').toLowerCase().includes(q) ||
-        x.entry_code.toLowerCase().includes(q) ||
-        x.package_name.toLowerCase().includes(q),
+      items = items.filter(
+        (x) =>
+          x.order_no.toLowerCase().includes(q) ||
+          x.registration_no.toLowerCase().includes(q) ||
+          x.applicant_name.toLowerCase().includes(q) ||
+          (x.applicant_email || '').toLowerCase().includes(q) ||
+          (x.farm_name || '').toLowerCase().includes(q) ||
+          x.entry_code.toLowerCase().includes(q) ||
+          x.package_name.toLowerCase().includes(q),
       );
     }
     if (filters?.farm_name?.trim()) {
       const farm = filters.farm_name.trim().toLowerCase();
-      items = items.filter((x) => (x.farm_name || '').toLowerCase().includes(farm));
+      items = items.filter((x) =>
+        (x.farm_name || '').toLowerCase().includes(farm),
+      );
     }
     if (filters?.status === 'checked_out') {
       items = items.filter((x) => x.checked_out);
@@ -321,7 +375,8 @@ export class CheckOutService {
     const nowIso = new Date().toISOString();
     const actorName = (params.actor_name || '').trim() || null;
     const actorId =
-      typeof params.actor_user_id === 'number' && Number.isFinite(params.actor_user_id)
+      typeof params.actor_user_id === 'number' &&
+      Number.isFinite(params.actor_user_id)
         ? params.actor_user_id
         : null;
 
@@ -345,11 +400,51 @@ export class CheckOutService {
       };
     });
 
-    if (!touched) throw new NotFoundException('ไม่พบ item ตาม entry_index ที่ระบุ');
+    if (!touched)
+      throw new NotFoundException('ไม่พบ item ตาม entry_index ที่ระบุ');
 
     registration.entries_json = JSON.stringify(next);
     await this.registrationRepository.save(registration);
+    await this.recordCheckoutAudit({
+      registration,
+      entry_index: targetIndex,
+      checked_out: params.checked_out,
+      actor_user_id: actorId,
+      actor_name: actorName,
+    });
     return { updated: true };
   }
-}
 
+  private async recordCheckoutAudit(params: {
+    registration: ActivityRegistration;
+    entry_index: string;
+    checked_out: boolean;
+    actor_user_id: number | null;
+    actor_name: string | null;
+  }): Promise<void> {
+    try {
+      const order = await this.orderRepository.findOne({
+        where: {
+          refer_id: params.registration.id,
+          type: OrderType.ACTIVITY_REGISTRATION,
+        },
+      });
+      await this.auditLogService.create({
+        action: 'submit',
+        entity_type: 'check_out',
+        entity_id: params.registration.id,
+        checker_user_id: params.actor_user_id,
+        checker_name: params.actor_name,
+        metadata: {
+          registration_no: params.registration.registration_no,
+          activity_id: params.registration.activity_id,
+          entry_index: params.entry_index,
+          checked_out: params.checked_out,
+          ...(order?.order_no ? { order_no: order.order_no } : {}),
+        },
+      });
+    } catch {
+      // ไม่ให้ audit ล้มการบันทึก checkout
+    }
+  }
+}

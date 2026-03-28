@@ -6,7 +6,7 @@ import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { MailService } from '../mail/mail.service';
@@ -331,17 +331,24 @@ export class OrderService {
       quantity: number;
       unit_price: number;
       line_total: number;
+      checked_out_at: string | null;
+      checked_out_by_name: string | null;
     }[];
   }> {
+    const isAdmin = user.role === UserRole.ADMIN;
+
     // Only filter by `status` when it's explicitly provided.
     const where: {
       order_no: string;
-      user_id: number;
+      user_id?: number;
       status?: OrderStatus;
     } = {
       order_no: orderNo,
-      user_id: user.id,
     };
+
+    if (!isAdmin) {
+      where.user_id = user.id;
+    }
 
     if (status !== undefined && status !== null) {
       where.status = status;
@@ -353,7 +360,7 @@ export class OrderService {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
     }
 
-    if (order.user_id !== user.id) {
+    if (!isAdmin && order.user_id !== user.id) {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
     }
 
@@ -368,6 +375,8 @@ export class OrderService {
       quantity: number;
       unit_price: number;
       line_total: number;
+      checked_out_at: string | null;
+      checked_out_by_name: string | null;
     }[] = [];
 
     if (order.type === OrderType.ACTIVITY_REGISTRATION) {
@@ -422,6 +431,16 @@ export class OrderService {
                 quantity: Number(e.quantity),
                 unit_price: Number(e.unit_price),
                 line_total: Number(e.line_total),
+                checked_out_at:
+                  e.checked_out_at != null &&
+                  String(e.checked_out_at).trim() !== ''
+                    ? String(e.checked_out_at)
+                    : null,
+                checked_out_by_name:
+                  e.checked_out_by_name != null &&
+                  String(e.checked_out_by_name).trim() !== ''
+                    ? String(e.checked_out_by_name)
+                    : null,
               };
             });
           }

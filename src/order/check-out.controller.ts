@@ -13,7 +13,6 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CheckOutService } from './check-out.service';
-import { Audit } from '../common/decorators/audit.decorator';
 
 @Controller('admin/check-out')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -47,16 +46,12 @@ export class CheckOutController {
   }
 
   @Post('item')
-  @Audit({
-    action: 'submit',
-    entity_type: 'check_in',
-    entityIdSource: 'body:registration_id',
-  })
   async toggleItem(
     @Body('registration_id') registrationId?: number,
     @Body('entry_index') entryIndex?: string,
     @Body('checked_out') checkedOut?: boolean,
-    @Request() req?: { user?: { id?: number; fullname?: string; email?: string } },
+    @Request()
+    req?: { user?: { id?: number; fullname?: string; email?: string } },
   ) {
     const id =
       typeof registrationId === 'number' && Number.isFinite(registrationId)
@@ -74,4 +69,3 @@ export class CheckOutController {
     });
   }
 }
-
