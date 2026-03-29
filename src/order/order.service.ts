@@ -968,17 +968,17 @@ export class OrderService {
           const base = displayName
             ? displayName
             : `ค่าสมัครแพ็กเกจ #${e.package_id}`;
-          const code =
-            e.entry_code != null && String(e.entry_code).trim() !== ''
-              ? String(e.entry_code).trim()
-              : e.index !== undefined &&
-                  e.index !== null &&
-                  String(e.index) !== ''
-                ? String(e.index)
-                : '';
-          const prefix = code ? `[${code}] ` : '';
+          // const code =
+          //   e.entry_code != null && String(e.entry_code).trim() !== ''
+          //     ? String(e.entry_code).trim()
+          //     : e.index !== undefined &&
+          //         e.index !== null &&
+          //         String(e.index) !== ''
+          //       ? String(e.index)
+          //       : '';
+          // const prefix = code ? `[${code}] ` : '';
           return {
-            label: `${prefix}${base}`,
+            label: `${base}`,
             amount: e.line_total,
           };
         }) ?? [];
