@@ -893,6 +893,9 @@ export class OrderService {
     order.status = status;
     order.cancel_reason =
       status === OrderStatus.CANCELLED && cancelReason ? cancelReason : null;
+    if (status !== OrderStatus.PAID) {
+      order.receipt_email_sent_at = null;
+    }
 
     // ถ้าเป็นออเดอร์สปอนเซอร์ และอนุมัติการชำระเงินแล้ว ให้เปิดแสดงบนหน้าแรกอัตโนมัติ
     if (order.type === OrderType.SPONSOR && status === OrderStatus.PAID) {
@@ -1052,6 +1055,7 @@ export class OrderService {
   /**
    * ส่งอีเมลใบเสร็จพร้อมแนบไฟล์ PDF ไปยังอีเมลผู้รับ (customer_email และถ้าต่างจากบัญชีผู้ใช้จะรวมอีเมลบัญชีด้วย)
    * @param options.force ใช้จากแอดมิน — ส่งซ้ำได้แม้เคยบันทึก receipt_email_sent_at แล้ว (cron ไม่ส่ง force)
+   * ส่งได้เฉพาะออเดอร์สถานะ paid เท่านั้น (ไม่ส่งและไม่ตั้ง receipt_email_sent_at ถ้าไม่ใช่ paid)
    * @returns true เมื่อส่ง SMTP สำเร็จและบันทึก receipt_email_sent_at
    */
   async sendReceiptEmail(
@@ -1063,6 +1067,9 @@ export class OrderService {
     });
     if (!order) {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+    if (order.status !== OrderStatus.PAID) {
+      return false;
     }
     if (!options?.force && order.receipt_email_sent_at) {
       return false;
