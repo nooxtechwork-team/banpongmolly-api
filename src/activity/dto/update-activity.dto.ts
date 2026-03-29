@@ -16,6 +16,11 @@ import { ActivityLiveEmbedDto } from './activity-live-embed.dto';
 
 export class UpdateActivityDto {
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  organizer_id?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(255)
   title?: string;

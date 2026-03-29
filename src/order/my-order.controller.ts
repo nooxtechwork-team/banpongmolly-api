@@ -56,7 +56,9 @@ export class MyOrderController {
   /** ต้องประกาศก่อน @Get(':orderNo') */
   @Get('summary/pending-ticket-check-ins')
   async pendingTicketCheckIns(@Request() req: { user: User }) {
-    const count = await this.orderService.countMyPendingTicketCheckIns(req.user);
+    const count = await this.orderService.countMyPendingTicketCheckIns(
+      req.user,
+    );
     return { count };
   }
 

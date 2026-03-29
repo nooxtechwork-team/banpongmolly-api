@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
@@ -10,11 +14,14 @@ import { User, UserRole } from '../entities/user.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { MailService } from '../mail/mail.service';
-import * as puppeteer from 'puppeteer';
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 import { CheckInGateway } from './check-in.gateway';
+import { ReceiptPuppeteerService } from './receipt-puppeteer.service';
+
+/** เพดานสูงสุดต่อ «หนึ่งครั้งที่รันสคริปต์» (RECEIPT_EMAIL_BATCH_LIMIT ไม่เกินค่านี้) */
+const RECEIPT_EMAIL_BATCH_HARD_MAX = 5000;
 
 @Injectable()
 export class OrderService {
@@ -29,9 +36,12 @@ export class OrderService {
     private readonly sponsorRepository: Repository<SponsorRegistration>,
     @InjectRepository(ActivityPackage)
     private readonly activityPackageRepository: Repository<ActivityPackage>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
     private readonly checkInGateway: CheckInGateway,
+    private readonly receiptPuppeteer: ReceiptPuppeteerService,
   ) {}
 
   private async loadPackageSlugPathFromLayer2ByLeafIds(
@@ -316,11 +326,7 @@ export class OrderService {
   async countMyPendingTicketCheckIns(user: User): Promise<number> {
     return this.orderRepository
       .createQueryBuilder('order')
-      .innerJoin(
-        ActivityRegistration,
-        'reg',
-        'reg.id = order.refer_id',
-      )
+      .innerJoin(ActivityRegistration, 'reg', 'reg.id = order.refer_id')
       .where('order.user_id = :userId', { userId: user.id })
       .andWhere('order.type = :type', { type: OrderType.ACTIVITY_REGISTRATION })
       .andWhere('order.status = :status', { status: OrderStatus.PAID })
@@ -437,13 +443,16 @@ export class OrderService {
                   ? String(idxRaw)
                   : '';
               const slugPath = slugPaths.get(packageId);
-              const entry_code = buildActivityRegistrationEntryCode(
-                slugPath ?? null,
-                idxStr || '0000',
-              );
+              const entry_code = isAdmin
+                ? buildActivityRegistrationEntryCode(
+                    slugPath ?? null,
+                    idxStr || '0000',
+                  )
+                : null;
+
               return {
-                ...(idxStr ? { index: idxStr } : {}),
-                ...(entry_code ? { entry_code } : {}),
+                ...(isAdmin && idxStr ? { index: idxStr } : {}),
+                ...(isAdmin && entry_code ? { entry_code } : {}),
                 package_id: packageId,
                 package_name: packageName,
                 quantity: Number(e.quantity),
@@ -906,7 +915,7 @@ export class OrderService {
       this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
     }
 
-    // หลังจากนี้สามารถเรียก sendReceiptEmail(order.id) เพื่อส่งใบเสร็จให้ลูกค้า (ใช้ใน endpoint แยก)
+    // ใบเสร็จทางเมลให้สคริปต์ cron กวาด (หรือ POST .../send-receipt เพื่อคิวซ้ำ)
     return saved;
   }
 
@@ -1015,38 +1024,52 @@ export class OrderService {
       .replace(/{{total_amount}}/g, formatAmount(Number(order.total_amount)))
       .replace(/{{lines}}/g, linesHtml);
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        preferCSSPageSize: true,
-        printBackground: true,
-        margin: { top: '0', bottom: '0', left: '0', right: '0' },
+    return this.receiptPuppeteer.htmlToPdfBuffer(html);
+  }
+
+  /** อีเมลผู้รับใบเสร็จ: customer_email + อีเมลบัญชี (user_id) ถ้าต่างกัน — dedupe แบบไม่สนตัวพิมพ์ */
+  private async resolveReceiptEmailRecipients(order: Order): Promise<string[]> {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (raw: string | null | undefined) => {
+      const trimmed = raw?.trim();
+      if (!trimmed) return;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(trimmed);
+    };
+    add(order.customer_email);
+    if (order.user_id != null) {
+      const user = await this.userRepository.findOne({
+        where: { id: order.user_id },
       });
-      return pdfBuffer;
-    } finally {
-      await browser.close();
+      add(user?.email);
     }
+    return out;
   }
 
   /**
-   * ส่งอีเมลใบเสร็จพร้อมแนบไฟล์ PDF ไปยังอีเมลของผู้ที่ทำรายการสั่งซื้อ
+   * ส่งอีเมลใบเสร็จพร้อมแนบไฟล์ PDF ไปยังอีเมลผู้รับ (customer_email และถ้าต่างจากบัญชีผู้ใช้จะรวมอีเมลบัญชีด้วย)
+   * @param options.force ใช้จากแอดมิน — ส่งซ้ำได้แม้เคยบันทึก receipt_email_sent_at แล้ว (cron ไม่ส่ง force)
+   * @returns true เมื่อส่ง SMTP สำเร็จและบันทึก receipt_email_sent_at
    */
-  async sendReceiptEmail(orderId: number): Promise<void> {
+  async sendReceiptEmail(
+    orderId: number,
+    options?: { force?: boolean },
+  ): Promise<boolean> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
     });
     if (!order) {
       throw new NotFoundException('ไม่พบคำสั่งซื้อ');
     }
-    if (!order.customer_email) {
-      // ไม่มีอีเมลให้ส่ง ข้าม
-      return;
+    if (!options?.force && order.receipt_email_sent_at) {
+      return false;
+    }
+    const recipients = await this.resolveReceiptEmailRecipients(order);
+    if (!recipients.length) {
+      return false;
     }
 
     const pdfUint8 = await this.generateReceiptPdf(orderId);
@@ -1077,10 +1100,8 @@ export class OrderService {
       .replace(/{{order_no}}/g, order.order_no)
       .replace(/{{total_amount}}/g, formattedTotal);
 
-    // ใช้ MailService โดยแนบไฟล์ PDF เป็นใบเสร็จ
-    // ถ้า Mail ไม่ได้ config ไว้ MailService จะ log warning และไม่ throw
-    await this.mailService.sendRawEmail({
-      to: order.customer_email,
+    const mailed = await this.mailService.sendRawEmail({
+      to: recipients.join(', '),
       subject: `ใบเสร็จรับเงินสำหรับคำสั่งซื้อ ${order.order_no}`,
       text: `แนบใบเสร็จรับเงินสำหรับคำสั่งซื้อหมายเลข ${order.order_no} ยอดชำระ ${formattedTotal} บาท`,
       html: emailHtml,
@@ -1091,6 +1112,90 @@ export class OrderService {
         },
       ],
     });
+
+    if (mailed) {
+      order.receipt_email_sent_at = new Date();
+      await this.orderRepository.save(order);
+    }
+
+    return mailed;
+  }
+
+  /**
+   * คิวให้ cron ส่งใบเสร็จ — เคลียร์ receipt_email_sent_at (ไม่สร้าง PDF / ไม่ส่งเมลใน request นี้)
+   * ใช้เมื่อแอดมินต้องการส่งซ้ำหลังเคยส่งแล้ว หรือ endpoint เดิมที่ไม่ทำงานหนักแล้ว
+   */
+  async queueReceiptEmailForCron(orderId: number): Promise<void> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+    if (order.status !== OrderStatus.PAID) {
+      throw new BadRequestException(
+        'คิวส่งใบเสร็จได้เฉพาะออเดอร์ที่ชำระเงินแล้ว',
+      );
+    }
+    const recipients = await this.resolveReceiptEmailRecipients(order);
+    if (!recipients.length) {
+      throw new BadRequestException(
+        'ไม่มีอีเมลผู้รับสำหรับออเดอร์นี้ (ทั้งอีเมลในคำสั่งซื้อและบัญชีผู้ใช้)',
+      );
+    }
+    order.receipt_email_sent_at = null;
+    await this.orderRepository.save(order);
+  }
+
+  /** ออเดอร์ paid + มีอีเมล (ในคำสั่งซื้อหรือบัญชีผู้ใช้) + ยังไม่เคยส่งใบเสร็จทางเมล (สำหรับสคริปต์ cron) */
+  async findPendingReceiptEmailOrderIds(limit: number): Promise<number[]> {
+    const safeLimit = Math.min(
+      Math.max(1, limit),
+      RECEIPT_EMAIL_BATCH_HARD_MAX,
+    );
+    const rows = await this.orderRepository
+      .createQueryBuilder('o')
+      .select('o.id', 'id')
+      .leftJoin(User, 'u', 'u.id = o.user_id')
+      .where('o.status = :paid', { paid: OrderStatus.PAID })
+      .andWhere('o.receipt_email_sent_at IS NULL')
+      .andWhere(
+        '(o.customer_email IS NOT NULL AND TRIM(o.customer_email) != :empty) OR (u.email IS NOT NULL AND TRIM(u.email) != :empty)',
+        { empty: '' },
+      )
+      .orderBy('o.updated_at', 'ASC')
+      .take(safeLimit)
+      .getRawMany();
+    return rows.map((r) => Number(r.id));
+  }
+
+  /**
+   * กวาดส่งใบเสร็จทางอีเมลเป็นชุด (เรียกจากสคริปต์ + cron)
+   * skipped = ไม่ส่งจริง (เช่น SMTP ยังไม่ตั้งค่า) จะถูกลองใหม่รอบถัดไป
+   */
+  async processPendingReceiptEmailBatch(limit?: number): Promise<{
+    candidates: number;
+    sent: number;
+    skipped: number;
+    failed: number;
+  }> {
+    const fromEnv = Number(process.env.RECEIPT_EMAIL_BATCH_LIMIT);
+    const batchLimit =
+      limit ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 50);
+    const ids = await this.findPendingReceiptEmailOrderIds(batchLimit);
+    let sent = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        const ok = await this.sendReceiptEmail(id);
+        if (ok) sent++;
+        else skipped++;
+      } catch {
+        failed++;
+      }
+    }
+    return { candidates: ids.length, sent, skipped, failed };
   }
 
   async findSponsorOrderBySponsorId(sponsorId: number): Promise<Order | null> {

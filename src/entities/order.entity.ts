@@ -69,4 +69,8 @@ export class Order {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  /** เวลาที่ส่งอีเมลใบเสร็จสำเร็จแล้ว (null = ยังไม่ส่ง / ใช้กับ cron กวาดส่ง) */
+  @Column({ name: 'receipt_email_sent_at', type: 'datetime', nullable: true })
+  receipt_email_sent_at: Date | null;
 }

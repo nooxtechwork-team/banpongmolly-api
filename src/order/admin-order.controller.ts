@@ -15,14 +15,14 @@ export class AdminOrderController {
   constructor(private readonly orderService: OrderService) {}
 
   /**
-   * ส่งอีเมลใบเสร็จพร้อมแนบไฟล์ PDF ให้ลูกค้าของออเดอร์นี้
-   * - ใช้หลังจากอนุมัติการชำระเงินแล้ว (status = paid)
+   * คิวส่งใบเสร็จให้สคริปต์ cron — ไม่สร้าง PDF / ไม่ส่งเมลใน request นี้
+   * (ล้าง receipt_email_sent_at เพื่อให้ batch กวาดส่งต่อ)
    */
   @Post(':id/send-receipt')
   async sendReceipt(
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<{ success: boolean }> {
-    await this.orderService.sendReceiptEmail(id);
-    return { success: true };
+  ): Promise<{ success: boolean; queued: boolean }> {
+    await this.orderService.queueReceiptEmailForCron(id);
+    return { success: true, queued: true };
   }
 }

@@ -100,3 +100,35 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 ## How to generate receipt PDF with puppeteer Chrome
 
 npx puppeteer browsers install chrome
+
+## ส่งใบเสร็จทางอีเมลแบบกวาด (cron)
+
+ออเดอร์สถานะ `paid` ที่มี `customer_email` และยังไม่มี `receipt_email_sent_at` จะถูกส่งใบเสร็จ PDF ทางเมลเมื่อรันสคริปต์
+
+1. เพิ่มคอลัมน์ในฐานข้อมูล (ถ้าไม่ใช้ TypeORM sync):
+
+```sql
+ALTER TABLE orders ADD COLUMN receipt_email_sent_at DATETIME NULL;
+```
+
+2. ตั้งค่า SMTP ใน `.env` (`MAIL_HOST`, `MAIL_USERNAME`, `MAIL_PASSWORD`, …)
+
+3. รันครั้งเดียวทดสอบ:
+
+```bash
+pnpm run script:send-pending-receipt-emails
+```
+
+4. ตัวอย่าง crontab — **รันทุก 1 นาที**
+
+ตั้ง `RECEIPT_EMAIL_BATCH_LIMIT=5000` ใน `.env` เพื่อให้ **หนึ่งรอบดึงได้สูงสุด 5,000 ออเดอร์** (เพดานในโค้ดไม่เกิน 5,000)
+
+**ระวังซ้อนกันของ cron:** ถ้ารอบหนึ่งยังรันไม่จบแล้วถึงนาทีถัดไป อาจสตาร์ทซ้ำ — แนะนำใช้ `flock` ให้รันได้ทีละโปรเซส:
+
+```cron
+* * * * * flock -n /tmp/receipt-mail.lock -c 'cd /absolute/path/to/api && pnpm run script:send-pending-receipt-emails >> /var/log/receipt-mail.log 2>&1'
+```
+
+1 วันมี 1,440 นาที — ถ้าแต่ละนาทีรันจบทันและเคลียร์ได้ 5,000 ออเดอร์ **โคว้าทฤษฎีสูงมาก**; ในทางปฏิบัติจำกัดด้วยความเร็ว Puppeteer + SMTP และ `flock` จะกันซ้ำเมื่อรอบก่อนยังไม่จบ
+
+`POST /admin/orders/:id/send-receipt` ไม่สร้าง PDF ใน request — แค่คิวให้ cron โดยเคลียร์ `receipt_email_sent_at` (ใช้เมื่อต้องการให้ส่งซ้ำหลังเคยส่งแล้ว)

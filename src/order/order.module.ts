@@ -5,6 +5,7 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration } from '../entities/sponsor.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
+import { User } from '../entities/user.entity';
 import { OrderService } from './order.service';
 import { OrderController } from './order.controller';
 import { MyOrderController } from './my-order.controller';
@@ -13,6 +14,7 @@ import { ApplicantsController } from './applicants.controller';
 import { CheckInService } from './check-in.service';
 import { CheckInController } from './check-in.controller';
 import { CheckInGateway } from './check-in.gateway';
+import { ReceiptPuppeteerService } from './receipt-puppeteer.service';
 import { PaymentsAdminController } from './payments-admin.controller';
 import { DashboardAdminController } from './dashboard-admin.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -29,6 +31,7 @@ import { CheckOutController } from './check-out.controller';
       Activity,
       SponsorRegistration,
       ActivityPackage,
+      User,
     ]),
     AuditLogModule,
     AuthModule,
@@ -39,6 +42,7 @@ import { CheckOutController } from './check-out.controller';
     CheckInService,
     CheckOutService,
     CheckInGateway,
+    ReceiptPuppeteerService,
   ],
   controllers: [
     OrderController,

@@ -263,7 +263,9 @@ export class ActivityService {
 
     const leafIds = [...new Set(items.map((i) => i.package_id))];
     const slugPaths =
-      await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(leafIds);
+      await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(
+        leafIds,
+      );
 
     let idxPos = 0;
     const storedLines: {
@@ -707,6 +709,9 @@ export class ActivityService {
     }
     if (dto.province_id !== undefined) {
       updates.province_id = dto.province_id ?? null;
+    }
+    if (dto.organizer_id !== undefined) {
+      updates.organizer_id = dto.organizer_id ?? null;
     }
     if (dto.activity_package_id !== undefined) {
       updates.activity_package_id = dto.activity_package_id ?? null;

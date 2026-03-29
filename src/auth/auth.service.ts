@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { ConfigService } from '@nestjs/config';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
 import { UserAuth, AuthProvider } from '../entities/user-auth.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -179,7 +179,10 @@ export class AuthService {
     );
   }
 
-  async login(loginDto: LoginDto, context?: { ip?: string | null; userAgent?: string | null }) {
+  async login(
+    loginDto: LoginDto,
+    context?: { ip?: string | null; userAgent?: string | null },
+  ) {
     const { email, password, remember_me = false } = loginDto;
 
     const user = await this.userRepository.findOne({
@@ -560,7 +563,9 @@ export class AuthService {
         reason: 'GOOGLE_LOGIN_ERROR',
         metadata: {
           message:
-            error instanceof Error ? error.message : 'Unknown Google login error',
+            error instanceof Error
+              ? error.message
+              : 'Unknown Google login error',
         },
         ip: context?.ip ?? null,
         userAgent: context?.userAgent ?? null,
@@ -650,15 +655,35 @@ export class AuthService {
     const refreshExpires =
       this.configService.get<string>('JWT_REFRESH_EXPIRATION') || '7d';
 
-    const accessToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.get<string>('JWT_SECRET'),
-      expiresIn: rememberMe ? accessExpires : '1h',
-    });
+    const isAdmin = user.role === UserRole.ADMIN;
+    /** ~100 ปี (วินาที) — jsonwebtoken ไม่ยอมรับ expiresIn เป็น undefined */
+    const adminTokenTtlSeconds = 60 * 60 * 24 * 365 * 100;
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-      expiresIn: rememberMe ? refreshExpires : '24h',
-    });
+    const accessToken = await this.jwtService.signAsync(
+      payload,
+      isAdmin
+        ? {
+            secret: this.configService.get<string>('JWT_SECRET'),
+            expiresIn: adminTokenTtlSeconds,
+          }
+        : {
+            secret: this.configService.get<string>('JWT_SECRET'),
+            expiresIn: rememberMe ? accessExpires : '1h',
+          },
+    );
+
+    const refreshToken = await this.jwtService.signAsync(
+      payload,
+      isAdmin
+        ? {
+            secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+            expiresIn: adminTokenTtlSeconds,
+          }
+        : {
+            secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+            expiresIn: rememberMe ? refreshExpires : '24h',
+          },
+    );
 
     return {
       access_token: accessToken,
@@ -753,21 +778,34 @@ export class AuthService {
       avatar_url?: string;
     },
   ) {
-    if (data.fullname !== undefined) user.fullname = data.fullname;
-    if (data.farm_name !== undefined) user.farm_name = data.farm_name || null;
-    if (data.contact_address !== undefined)
-      user.contact_address = data.contact_address || null;
-    if (data.phone_number !== undefined)
-      user.phone_number = data.phone_number || null;
-    if (data.province_id !== undefined)
-      user.province_id = data.province_id ?? null;
-    if (data.about_you !== undefined) user.about_you = data.about_you || null;
-    if (data.line_id !== undefined) user.line_id = data.line_id || null;
-    if (data.avatar_url !== undefined)
-      user.avatar_url = data.avatar_url || null;
-    await this.userRepository.save(user);
+    const patch: Partial<{
+      fullname: string;
+      farm_name: string | null;
+      contact_address: string | null;
+      phone_number: string | null;
+      province_id: number | null;
+      about_you: string | null;
+      line_id: string | null;
+      avatar_url: string | null;
+    }> = {};
 
-    // reload user with latest relations (province) before building profile response
+    if (data.fullname !== undefined) patch.fullname = data.fullname;
+    if (data.farm_name !== undefined) patch.farm_name = data.farm_name || null;
+    if (data.contact_address !== undefined)
+      patch.contact_address = data.contact_address || null;
+    if (data.phone_number !== undefined)
+      patch.phone_number = data.phone_number || null;
+    if (data.province_id !== undefined)
+      patch.province_id = data.province_id ?? null;
+    if (data.about_you !== undefined) patch.about_you = data.about_you || null;
+    if (data.line_id !== undefined) patch.line_id = data.line_id || null;
+    if (data.avatar_url !== undefined)
+      patch.avatar_url = data.avatar_url || null;
+
+    if (Object.keys(patch).length > 0) {
+      await this.userRepository.update({ id: user.id }, patch);
+    }
+
     const reloaded = await this.userRepository.findOne({
       where: { id: user.id },
       relations: ['province'],

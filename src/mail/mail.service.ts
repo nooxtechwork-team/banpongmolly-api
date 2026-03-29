@@ -25,16 +25,17 @@ export class MailService {
     }
   }
 
+  /** @returns true ถ้าส่งจริง, false ถ้าไม่ได้ตั้งค่า SMTP (ข้าม) */
   async sendRawEmail(options: {
     to: string;
     subject: string;
     text?: string;
     html?: string;
     attachments?: { filename: string; content: Buffer | string }[];
-  }): Promise<void> {
+  }): Promise<boolean> {
     if (!this.transporter) {
       this.logger.warn('Mail not configured, skipping email');
-      return;
+      return false;
     }
     try {
       await this.transporter.sendMail({
@@ -45,6 +46,7 @@ export class MailService {
         html: options.html,
         attachments: options.attachments,
       });
+      return true;
     } catch (err) {
       this.logger.error(
         `Failed to send email to ${options.to}: ${
