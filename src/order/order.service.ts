@@ -519,6 +519,7 @@ export class OrderService {
       total_amount: number;
       status: OrderStatus;
       created_at: string;
+      receipt_email_sent_at: string | null;
     }[];
     total: number;
   }> {
@@ -562,6 +563,7 @@ export class OrderService {
         'reg.entries_json AS entries_json',
         'user.avatar_url AS avatar_url',
         'act.title AS activity_title',
+        'order.receipt_email_sent_at AS receipt_email_sent_at',
       ])
       .orderBy('order.created_at', 'DESC')
       .offset((safePage - 1) * safeLimit)
@@ -592,6 +594,9 @@ export class OrderService {
         total_amount: Number(r.total_amount) || 0,
         status: r.status as OrderStatus,
         created_at: new Date(r.created_at).toISOString(),
+        receipt_email_sent_at: r.receipt_email_sent_at
+          ? new Date(r.receipt_email_sent_at).toISOString()
+          : null,
       };
     });
 
@@ -607,6 +612,7 @@ export class OrderService {
       total_amount: number;
       created_at: string;
       cancel_reason: string | null;
+      receipt_email_sent_at: string | null;
     };
     registration: {
       id: number;
@@ -714,6 +720,9 @@ export class OrderService {
         total_amount: Number(order.total_amount),
         created_at: new Date(order.created_at).toISOString(),
         cancel_reason: order.cancel_reason ?? null,
+        receipt_email_sent_at: order.receipt_email_sent_at
+          ? new Date(order.receipt_email_sent_at).toISOString()
+          : null,
       },
       registration: registration
         ? {
@@ -747,6 +756,7 @@ export class OrderService {
       total_amount: number;
       status: OrderStatus;
       created_at: string;
+      receipt_email_sent_at: string | null;
     }[];
     total: number;
   }> {
@@ -789,6 +799,7 @@ export class OrderService {
         'sponsor.contact_name AS contact_name',
         'sponsor.logo_url AS logo_url',
         'act.title AS activity_title',
+        'order.receipt_email_sent_at AS receipt_email_sent_at',
       ])
       .orderBy('order.created_at', 'DESC')
       .offset((safePage - 1) * safeLimit)
@@ -805,6 +816,9 @@ export class OrderService {
       total_amount: Number(r.total_amount) || 0,
       status: r.status as OrderStatus,
       created_at: new Date(r.created_at).toISOString(),
+      receipt_email_sent_at: r.receipt_email_sent_at
+        ? new Date(r.receipt_email_sent_at).toISOString()
+        : null,
     }));
 
     return { items, total };
@@ -819,6 +833,7 @@ export class OrderService {
       total_amount: number;
       created_at: string;
       cancel_reason: string | null;
+      receipt_email_sent_at: string | null;
     };
     sponsor: {
       id: number;
@@ -860,6 +875,9 @@ export class OrderService {
         total_amount: Number(order.total_amount),
         created_at: new Date(order.created_at).toISOString(),
         cancel_reason: order.cancel_reason ?? null,
+        receipt_email_sent_at: order.receipt_email_sent_at
+          ? new Date(order.receipt_email_sent_at).toISOString()
+          : null,
       },
       sponsor: sponsor
         ? {
