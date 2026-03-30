@@ -357,6 +357,9 @@ export class OrderService {
       line_total: number;
       checked_out_at: string | null;
       checked_out_by_name: string | null;
+      checkout_requested_at: string | null;
+      checkout_request_note: string | null;
+      checkout_remark: string | null;
     }[];
   }> {
     const isAdmin = user.role === UserRole.ADMIN;
@@ -401,6 +404,9 @@ export class OrderService {
       line_total: number;
       checked_out_at: string | null;
       checked_out_by_name: string | null;
+      checkout_requested_at: string | null;
+      checkout_request_note: string | null;
+      checkout_remark: string | null;
     }[] = [];
 
     if (order.type === OrderType.ACTIVITY_REGISTRATION) {
@@ -450,8 +456,13 @@ export class OrderService {
                   )
                 : null;
 
+              const optIso = (v: unknown): string | null =>
+                v != null && String(v).trim() !== '' ? String(v).trim() : null;
+              const optNote = (v: unknown): string | null =>
+                v != null && String(v).trim() !== '' ? String(v).trim() : null;
+
               return {
-                ...(isAdmin && idxStr ? { index: idxStr } : {}),
+                ...(idxStr ? { index: idxStr } : {}),
                 ...(isAdmin && entry_code ? { entry_code } : {}),
                 package_id: packageId,
                 package_name: packageName,
@@ -468,6 +479,9 @@ export class OrderService {
                   String(e.checked_out_by_name).trim() !== ''
                     ? String(e.checked_out_by_name)
                     : null,
+                checkout_requested_at: optIso(e.checkout_requested_at),
+                checkout_request_note: optNote(e.checkout_request_note),
+                checkout_remark: optNote(e.checkout_remark),
               };
             });
           }
@@ -498,6 +512,78 @@ export class OrderService {
       activity,
       entries,
     };
+  }
+
+  /**
+   * ผู้ใช้ขอแจ้งเตือนให้แอดมินดำเนินการ checkout ราย item (หลังเช็คอินแล้ว)
+   */
+  async requestEntryCheckoutRequest(
+    user: User,
+    orderNo: string,
+    entryIndex: string,
+    note: string | null,
+  ): Promise<{ success: true }> {
+    const order = await this.orderRepository.findOne({
+      where: { order_no: orderNo, user_id: user.id },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+    if (order.type !== OrderType.ACTIVITY_REGISTRATION) {
+      throw new BadRequestException('ใช้ได้เฉพาะคำสั่งซื้อสมัครกิจกรรม');
+    }
+    if (order.status !== OrderStatus.PAID) {
+      throw new BadRequestException('ต้องชำระเงินแล้วจึงขอแจ้งคืนปลาได้');
+    }
+    const registration = await this.registrationRepository.findOne({
+      where: { id: order.refer_id },
+    });
+    if (!registration) {
+      throw new NotFoundException('ไม่พบใบสมัคร');
+    }
+    if (!registration.checked_in_at) {
+      throw new BadRequestException('ต้องเช็คอินที่งานก่อนจึงจะขอคืนปลาได้');
+    }
+    const target = (entryIndex || '').trim();
+    if (!target) {
+      throw new BadRequestException('กรุณาระบุรายการ');
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(registration.entries_json || '[]');
+    } catch {
+      throw new BadRequestException('ข้อมูลรายการไม่ถูกต้อง');
+    }
+    if (!Array.isArray(parsed)) {
+      throw new BadRequestException('ข้อมูลรายการไม่ถูกต้อง');
+    }
+    const entries = parsed as Record<string, unknown>[];
+    const nowIso = new Date().toISOString();
+    let touched = false;
+    const next = entries.map((e) => {
+      const idx =
+        e.index != null && String(e.index).trim() !== ''
+          ? String(e.index).trim()
+          : '';
+      if (idx !== target) {
+        return e;
+      }
+      touched = true;
+      if (e.checked_out_at != null && String(e.checked_out_at).trim() !== '') {
+        throw new BadRequestException('รายการนี้ checkout แล้ว');
+      }
+      return {
+        ...e,
+        checkout_requested_at: nowIso,
+        checkout_request_note: note && note.length > 0 ? note : null,
+      };
+    });
+    if (!touched) {
+      throw new NotFoundException('ไม่พบรายการตามเลขลำดับที่ระบุ');
+    }
+    registration.entries_json = JSON.stringify(next);
+    await this.registrationRepository.save(registration);
+    return { success: true };
   }
 
   // ADMIN: list payments (activity registration orders) with pagination

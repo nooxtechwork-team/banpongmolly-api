@@ -48,8 +48,9 @@ export class ActivityRegistration {
   note: string | null;
 
   /**
-   * JSON string: [{ index, entry_code, package_id, quantity (1 ต่อแถว), unit_price, line_total }, ...]
-   * entry_code = อักษรจาก slug แม่+ลูก + เลข index (สร้างตอนบันทึก)
+   * JSON string: [{ index, entry_code, package_id, quantity (1 ต่อแถว), unit_price, line_total,
+   *   checked_out_at?, checked_out_by_*, checkout_requested_at?, checkout_request_note?,
+   *   checkout_remark? (หมายเหตุแอดมินตอนยืนยัน checkout) }, ...]
    */
   @Column({ type: 'text' })
   entries_json: string;

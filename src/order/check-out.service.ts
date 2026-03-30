@@ -22,6 +22,9 @@ type EntryJsonRow = {
   checked_out_at?: string | null;
   checked_out_by_user_id?: number | null;
   checked_out_by_name?: string | null;
+  checkout_requested_at?: string | null;
+  checkout_request_note?: string | null;
+  checkout_remark?: string | null;
 };
 
 export interface CheckoutActivitySummary {
@@ -49,6 +52,11 @@ export interface CheckoutItemRow {
   checked_out: boolean;
   checked_out_at: string | null;
   checked_out_by_name: string | null;
+  /** ผู้ใช้ขอให้ดำเนินการ checkout */
+  checkout_requested_at: string | null;
+  checkout_request_note: string | null;
+  /** หมายเหตุจากแอดมินตอนยืนยัน checkout */
+  checkout_remark: string | null;
 }
 
 @Injectable()
@@ -210,7 +218,7 @@ export class CheckOutService {
   async getActivityItems(
     activityId: number,
     filters?: {
-      status?: 'all' | 'checked_out' | 'pending';
+      status?: 'all' | 'checked_out' | 'pending' | 'requested';
       search?: string;
       farm_name?: string;
     },
@@ -313,6 +321,19 @@ export class CheckOutService {
               e.checked_out_by_name != null
                 ? String(e.checked_out_by_name)
                 : null,
+            checkout_requested_at: e.checkout_requested_at
+              ? String(e.checkout_requested_at)
+              : null,
+            checkout_request_note:
+              e.checkout_request_note != null &&
+              String(e.checkout_request_note).trim() !== ''
+                ? String(e.checkout_request_note).trim()
+                : null,
+            checkout_remark:
+              e.checkout_remark != null &&
+              String(e.checkout_remark).trim() !== ''
+                ? String(e.checkout_remark).trim()
+                : null,
           } satisfies CheckoutItemRow;
         }),
       );
@@ -341,6 +362,8 @@ export class CheckOutService {
       items = items.filter((x) => x.checked_out);
     } else if (filters?.status === 'pending') {
       items = items.filter((x) => !x.checked_out);
+    } else if (filters?.status === 'requested') {
+      items = items.filter((x) => !x.checked_out && !!x.checkout_requested_at);
     }
 
     const checkedOut = items.filter((x) => x.checked_out).length;
@@ -359,6 +382,8 @@ export class CheckOutService {
     registration_id: number;
     entry_index: string;
     checked_out: boolean;
+    /** หมายเหตุจากแอดมิน (ตอนยืนยัน checkout) เช่น ปลาไม่ได้คืนที่งาน แต่ส่งกลับ */
+    checkout_remark?: string | null;
     actor_user_id?: number | null;
     actor_name?: string | null;
   }): Promise<{ updated: true }> {
@@ -379,6 +404,10 @@ export class CheckOutService {
       Number.isFinite(params.actor_user_id)
         ? params.actor_user_id
         : null;
+    const remarkTrim =
+      params.checkout_remark != null
+        ? String(params.checkout_remark).trim()
+        : '';
 
     const next = entries.map((e) => {
       const idx = e.index != null ? String(e.index).trim() : '';
@@ -390,6 +419,7 @@ export class CheckOutService {
           checked_out_at: nowIso,
           checked_out_by_user_id: actorId,
           checked_out_by_name: actorName,
+          checkout_remark: remarkTrim || null,
         };
       }
       return {
@@ -397,6 +427,7 @@ export class CheckOutService {
         checked_out_at: null,
         checked_out_by_user_id: null,
         checked_out_by_name: null,
+        checkout_remark: null,
       };
     });
 
@@ -409,6 +440,7 @@ export class CheckOutService {
       registration,
       entry_index: targetIndex,
       checked_out: params.checked_out,
+      checkout_remark: params.checked_out ? remarkTrim || null : null,
       actor_user_id: actorId,
       actor_name: actorName,
     });
@@ -419,6 +451,7 @@ export class CheckOutService {
     registration: ActivityRegistration;
     entry_index: string;
     checked_out: boolean;
+    checkout_remark: string | null;
     actor_user_id: number | null;
     actor_name: string | null;
   }): Promise<void> {
@@ -440,6 +473,9 @@ export class CheckOutService {
           activity_id: params.registration.activity_id,
           entry_index: params.entry_index,
           checked_out: params.checked_out,
+          ...(params.checkout_remark
+            ? { checkout_remark: params.checkout_remark }
+            : {}),
           ...(order?.order_no ? { order_no: order.order_no } : {}),
         },
       });

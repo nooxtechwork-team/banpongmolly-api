@@ -34,12 +34,17 @@ export class CheckOutController {
   @Get('activity/:activityId/items')
   async listActivityItems(
     @Param('activityId', ParseIntPipe) activityId: number,
-    @Query('status') status?: 'all' | 'checked_out' | 'pending',
+    @Query('status') status?: 'all' | 'checked_out' | 'pending' | 'requested',
     @Query('search') search?: string,
     @Query('farm_name') farmName?: string,
   ) {
     return this.checkOutService.getActivityItems(activityId, {
-      status: status || 'all',
+      status:
+        status === 'checked_out' ||
+        status === 'pending' ||
+        status === 'requested'
+          ? status
+          : 'all',
       search: search || '',
       farm_name: farmName || '',
     });
@@ -50,6 +55,7 @@ export class CheckOutController {
     @Body('registration_id') registrationId?: number,
     @Body('entry_index') entryIndex?: string,
     @Body('checked_out') checkedOut?: boolean,
+    @Body('checkout_remark') checkoutRemark?: string,
     @Request()
     req?: { user?: { id?: number; fullname?: string; email?: string } },
   ) {
@@ -64,6 +70,7 @@ export class CheckOutController {
       registration_id: id,
       entry_index: String(entryIndex || ''),
       checked_out: !!checkedOut,
+      checkout_remark: checkoutRemark ?? null,
       actor_user_id: req?.user?.id ?? null,
       actor_name: req?.user?.fullname || req?.user?.email || null,
     });

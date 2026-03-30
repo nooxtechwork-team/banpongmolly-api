@@ -1,6 +1,8 @@
 import {
+  Body,
   Controller,
   Get,
+  Post,
   Query,
   Param,
   UseGuards,
@@ -68,6 +70,22 @@ export class MyOrderController {
     @Param('orderNo') orderNo: string,
   ) {
     return this.orderService.findMyOrderDetail(req.user, orderNo);
+  }
+
+  /** ขอแจ้งเตือนให้แอดมินดำเนินการ checkout ราย item (หลังเช็คอินแล้ว) */
+  @Post(':orderNo/entries/checkout-request')
+  async requestEntryCheckout(
+    @Request() req: { user: User },
+    @Param('orderNo') orderNo: string,
+    @Body('entry_index') entryIndex?: string,
+    @Body('note') note?: string,
+  ) {
+    return this.orderService.requestEntryCheckoutRequest(
+      req.user,
+      orderNo,
+      String(entryIndex || ''),
+      note?.trim() || null,
+    );
   }
 
   @Get(':orderNo/receipt.pdf')
