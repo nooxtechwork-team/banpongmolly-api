@@ -342,6 +342,9 @@ export class OrderService {
     user: User,
     orderNo: string,
     status?: OrderStatus | null,
+    options?: {
+      entryCodePolicy?: 'checked_in' | 'always';
+    },
   ): Promise<{
     order: Order;
     registration: ActivityRegistration | null;
@@ -363,6 +366,7 @@ export class OrderService {
     }[];
   }> {
     const isAdmin = user.role === UserRole.ADMIN;
+    const entryCodePolicy = options?.entryCodePolicy ?? 'checked_in';
 
     // Only filter by `status` when it's explicitly provided.
     const where: {
@@ -437,6 +441,10 @@ export class OrderService {
             const slugPaths =
               await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
 
+            const isCheckedIn =
+              registration.checked_in_at != null &&
+              String(registration.checked_in_at).trim() !== '';
+
             entries = parsed.map((e: any) => {
               const packageId = Number(e.package_id);
               const packageName =
@@ -449,7 +457,10 @@ export class OrderService {
                   ? String(idxRaw)
                   : '';
               const slugPath = slugPaths.get(packageId);
-              const entry_code = isAdmin
+              const canExposeEntryCode =
+                entryCodePolicy === 'always' ||
+                (entryCodePolicy === 'checked_in' && isCheckedIn);
+              const entry_code = canExposeEntryCode
                 ? buildActivityRegistrationEntryCode(
                     slugPath ?? null,
                     idxStr || '0000',
@@ -463,7 +474,7 @@ export class OrderService {
 
               return {
                 ...(idxStr ? { index: idxStr } : {}),
-                ...(isAdmin && entry_code ? { entry_code } : {}),
+                ...(canExposeEntryCode && entry_code ? { entry_code } : {}),
                 package_id: packageId,
                 package_name: packageName,
                 quantity: Number(e.quantity),
