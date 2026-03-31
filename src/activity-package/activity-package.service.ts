@@ -9,7 +9,7 @@ import { UpdateActivityPackageDto } from './dto/update-activity-package.dto';
 export interface ActivityPackageWithPrice {
   id: number;
   name: string;
-  slug: string;
+  slug: string | null;
   parent_id: number | null;
   sort_order: number;
   is_active: boolean;
@@ -23,16 +23,8 @@ export interface ActivityPackageTreeNode extends ActivityPackageWithPrice {
 /** slug แม่ (ถ้ามี) + slug ของโหนดลูกที่สมัคร */
 export type PackageSlugChain = {
   parentSlug: string | null;
-  leafSlug: string;
+  leafSlug: string | null;
 };
-
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^\p{L}\p{N}-]/gu, '');
-}
 
 @Injectable()
 export class ActivityPackageService {
@@ -71,16 +63,17 @@ export class ActivityPackageService {
     for (const leaf of leaves) {
       const pslug =
         leaf.parent_id != null
-          ? parentById.get(leaf.parent_id)?.slug ?? null
+          ? (parentById.get(leaf.parent_id)?.slug ?? null)
           : null;
-      map.set(leaf.id, { parentSlug: pslug, leafSlug: leaf.slug });
+      map.set(leaf.id, { parentSlug: pslug, leafSlug: leaf.slug ?? null });
     }
     return map;
   }
 
   /**
-   * คืน slug path สำหรับทำ entry_code โดย "ตัด layer แรกออก"
-   * เช่น root/normal/a/a1 => normal-a-a1
+   * คืน slug path สำหรับทำ entry_code แบบแม่ -> ลูก
+   * ข้ามโหนดที่ไม่มี slug และ concat โดยไม่ใส่ตัวคั่น
+   * เช่น (ไม่มี)/(A)/(ไม่มี)/(A1)/(O) => AA1O
    */
   async findSlugPathFromLayer2ByLeafIds(
     leafIds: number[],
@@ -112,14 +105,14 @@ export class ActivityPackageService {
       const path: string[] = [];
       let cur = visited.get(leafId);
       while (cur) {
-        path.push(cur.slug);
+        const slug = cur.slug?.trim();
+        if (slug) path.push(slug);
         if (cur.parent_id == null) break;
         cur = visited.get(cur.parent_id);
       }
       if (!path.length) continue;
       const topToLeaf = path.reverse();
-      const fromLayer2 = topToLeaf.slice(1).filter(Boolean);
-      const slugPath = (fromLayer2.length ? fromLayer2 : topToLeaf).join('-');
+      const slugPath = topToLeaf.filter(Boolean).join('');
       out.set(leafId, slugPath);
     }
 
@@ -233,9 +226,10 @@ export class ActivityPackageService {
   }
 
   async create(dto: CreateActivityPackageDto): Promise<ActivityPackage> {
+    const trimmedSlug = dto.slug?.trim();
     const pkg = this.packageRepository.create({
       name: dto.name,
-      slug: dto.slug || slugify(dto.name),
+      slug: trimmedSlug || null,
       parent_id: dto.parent_id ?? null,
       sort_order: dto.sort_order ?? 0,
       is_active: dto.is_active ?? true,
@@ -257,8 +251,10 @@ export class ActivityPackageService {
     }
 
     if (dto.name !== undefined) existing.name = dto.name;
-    if (dto.slug !== undefined)
-      existing.slug = dto.slug || slugify(existing.name);
+    if (dto.slug !== undefined) {
+      const trimmedSlug = dto.slug == null ? '' : String(dto.slug).trim();
+      existing.slug = trimmedSlug || null;
+    }
     if (dto.parent_id !== undefined) existing.parent_id = dto.parent_id ?? null;
     if (dto.sort_order !== undefined) existing.sort_order = dto.sort_order;
     if (dto.is_active !== undefined) existing.is_active = dto.is_active;

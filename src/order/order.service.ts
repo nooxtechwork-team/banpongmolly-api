@@ -72,14 +72,14 @@ export class OrderService {
       const path: string[] = [];
       let cur = visited.get(leafId);
       while (cur) {
-        path.push(cur.slug);
+        const slug = cur.slug?.trim();
+        if (slug) path.push(slug);
         if (cur.parent_id == null) break;
         cur = visited.get(cur.parent_id);
       }
       if (!path.length) continue;
       const topToLeaf = path.reverse();
-      const fromLayer2 = topToLeaf.slice(1).filter(Boolean);
-      const slugPath = (fromLayer2.length ? fromLayer2 : topToLeaf).join('-');
+      const slugPath = topToLeaf.filter(Boolean).join('');
       out.set(leafId, slugPath);
     }
 

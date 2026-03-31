@@ -18,8 +18,8 @@ export class ActivityPackage {
   @Column({ type: 'varchar', length: 191 })
   name: string;
 
-  @Column({ type: 'varchar', length: 191, unique: true })
-  slug: string;
+  @Column({ type: 'varchar', length: 191, nullable: true })
+  slug: string | null;
 
   @Column({ type: 'int', default: 0 })
   sort_order: number;

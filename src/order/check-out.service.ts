@@ -147,14 +147,14 @@ export class CheckOutService {
       const slugs: string[] = [];
       let cur = visited.get(leafId);
       while (cur) {
-        slugs.push(cur.slug);
+        const slug = cur.slug?.trim();
+        if (slug) slugs.push(slug);
         if (cur.parent_id == null) break;
         cur = visited.get(cur.parent_id);
       }
       if (!slugs.length) continue;
       const topToLeaf = slugs.reverse();
-      const fromLayer2 = topToLeaf.slice(1).filter(Boolean);
-      out.set(leafId, (fromLayer2.length ? fromLayer2 : topToLeaf).join('-'));
+      out.set(leafId, topToLeaf.filter(Boolean).join(''));
     }
     return out;
   }
