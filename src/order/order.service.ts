@@ -1138,9 +1138,12 @@ export class OrderService {
   private async resolveReceiptEmailRecipients(order: Order): Promise<string[]> {
     const seen = new Set<string>();
     const out: string[] = [];
+    const isLinePlaceholderEmail = (email: string) =>
+      email.toLowerCase().endsWith('@line.local');
     const add = (raw: string | null | undefined) => {
       const trimmed = raw?.trim();
       if (!trimmed) return;
+      if (isLinePlaceholderEmail(trimmed)) return;
       const key = trimmed.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);

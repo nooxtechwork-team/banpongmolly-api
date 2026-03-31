@@ -442,10 +442,6 @@ export class AuthService {
     const fullname = payload.name || 'LINE User';
     const avatarUrl = payload.picture ?? null;
 
-    if (!email) {
-      throw new BadRequestException('LINE ไม่ได้ให้ข้อมูลอีเมล');
-    }
-
     // เคยผูก LINE แล้ว → คืน user เดิม (แต่ถ้า accepted_terms_at ยังว่าง ให้ stamp ให้ด้วย)
     const existingAuth = await this.userAuthRepository.findOne({
       where: {
@@ -459,15 +455,24 @@ export class AuthService {
       return existingAuth.user;
     }
 
-    // ยังไม่เคยผูก LINE: หา user จากอีเมลก่อน
-    let user = await this.userRepository.findOne({
-      where: { email },
-      relations: ['auths'],
-    });
+    // ยังไม่เคยผูก LINE:
+    //  - ถ้า LINE ให้ email มา → พยายามหา user เดิมจาก email ก่อน (เชื่อมบัญชี)
+    //  - ถ้าไม่มี email → สร้าง user ใหม่ด้วยอีเมลภายในที่ผูกกับ lineId (เช่น <lineId>@line.local)
+    let user: User | null = null;
+    if (email) {
+      user = await this.userRepository.findOne({
+        where: { email },
+        relations: ['auths'],
+      });
+    }
 
     if (!user) {
+      const effectiveEmail =
+        email && email.trim()
+          ? email.trim().toLowerCase()
+          : `${lineId}@line.local`;
       user = this.userRepository.create({
-        email,
+        email: effectiveEmail,
         fullname,
         avatar_url: avatarUrl,
         is_verified: true,
