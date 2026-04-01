@@ -29,12 +29,12 @@ async function bootstrap() {
   // Increase JSON and URL-encoded body size limits to handle large payloads
   app.use(
     bodyParser.json({
-      limit: '5mb',
+      limit: '100mb',
     }),
   );
   app.use(
     bodyParser.urlencoded({
-      limit: '5mb',
+      limit: '100mb',
       extended: true,
     }),
   );
