@@ -1,4 +1,5 @@
 import {
+  Allow,
   ArrayMaxSize,
   IsArray,
   IsBoolean,
@@ -140,4 +141,9 @@ export class UpdateActivityDto {
   @ValidateNested({ each: true })
   @Type(() => ActivityLiveEmbedDto)
   live_embeds?: ActivityLiveEmbedDto[];
+
+  /** สรุปผลการแข่งขัน (object → เก็บเป็น JSON) ส่ง null เพื่อล้างค่า */
+  @IsOptional()
+  @Allow()
+  competition_dashboard?: Record<string, unknown> | null;
 }

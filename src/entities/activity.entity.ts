@@ -44,6 +44,12 @@ export class Activity {
   @Column({ type: 'text', nullable: true })
   live_embeds_json: string | null;
 
+  /**
+   * JSON: การตั้งค่า Dashboard สรุปผลการแข่งขัน (แชมป์ + อันดับ 1–5 ต่อคลาส) — parse ฝั่ง API/client
+   */
+  @Column({ type: 'text', nullable: true })
+  competition_dashboard_json: string | null;
+
   @Column({ type: 'varchar', length: 512, nullable: true })
   detail_infographic_url: string | null;
 

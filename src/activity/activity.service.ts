@@ -30,6 +30,10 @@ import {
   parseActivityLiveEmbedsJson,
   serializeActivityLiveEmbeds,
 } from '../common/utils/activity-live-embeds.util';
+import {
+  parseCompetitionDashboardJson,
+  type CompetitionDashboardPayload,
+} from '../common/utils/competition-dashboard.util';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 import { UserActionLogService } from '../user-action-log/user-action-log.service';
 import { LegalPolicyService } from '../legal/legal-policy.service';
@@ -44,12 +48,13 @@ function slugify(text: string): string {
     .replace(/[^\p{L}\p{N}-]/gu, '');
 }
 
-export type ActivityPublicDetail = Activity & {
+export type ActivityPublicDetail = Omit<Activity, 'competition_dashboard_json'> & {
   price_range: { min: number | null; max: number | null };
   rewards?: ActivityRewardDto[];
   tags?: ActivityTagDto[];
   sponsor_packages?: SponsorPackage[];
   live_embeds: ActivityLiveEmbed[];
+  competition_dashboard: CompetitionDashboardPayload | null;
 };
 
 export interface ActivityLeafClass {
@@ -569,13 +574,17 @@ export class ActivityService {
       this.activityTagService.getTagsForActivity(activity.id),
       this.getSponsorPackagesForActivity(activity.id),
     ]);
+    const { competition_dashboard_json, ...rest } = activity;
     return {
-      ...activity,
+      ...rest,
       price_range,
       rewards,
       tags,
       sponsor_packages,
       live_embeds: parseActivityLiveEmbedsJson(activity.live_embeds_json),
+      competition_dashboard: parseCompetitionDashboardJson(
+        competition_dashboard_json,
+      ),
     };
   }
 
@@ -676,6 +685,7 @@ export class ActivityService {
       activity_package_id: dto.activity_package_id ?? null,
       max_participants: dto.max_participants ?? 0,
       status: dto.status,
+      competition_dashboard_json: null,
     });
     const saved = await this.activityRepository.save(entity);
     if (dto.tags) {
@@ -785,6 +795,12 @@ export class ActivityService {
           embed_url: e.embed_url,
         })),
       );
+    }
+    if (dto.competition_dashboard !== undefined) {
+      updates.competition_dashboard_json =
+        dto.competition_dashboard === null
+          ? null
+          : JSON.stringify(dto.competition_dashboard);
     }
 
     const merged = this.activityRepository.merge(existing, updates);
