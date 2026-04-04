@@ -22,6 +22,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AdminOrderController } from './admin-order.controller';
 import { CheckOutService } from './check-out.service';
 import { CheckOutController } from './check-out.controller';
+import { PaymentConfigModule } from '../payment-config/payment-config.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { CheckOutController } from './check-out.controller';
     ]),
     AuditLogModule,
     AuthModule,
+    PaymentConfigModule,
   ],
   providers: [
     OrderService,
@@ -54,6 +56,6 @@ import { CheckOutController } from './check-out.controller';
     DashboardAdminController,
     CheckOutController,
   ],
-  exports: [OrderService],
+  exports: [OrderService, CheckOutService],
 })
 export class OrderModule {}

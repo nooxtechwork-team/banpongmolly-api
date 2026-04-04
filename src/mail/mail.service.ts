@@ -69,7 +69,7 @@ export class MailService {
       await this.transporter.sendMail({
         from: this.configService.get<string>('MAIL_USERNAME'),
         to,
-        subject: 'ยืนยันอีเมลของคุณ - Molly Fish Event',
+        subject: 'ยืนยันอีเมลของคุณ - Banpong Molly',
         text: `กรุณาคลิกลิงก์ด้านล่างเพื่อยืนยันอีเมล:\n${verifyUrl}`,
         html: `
         <p>สวัสดีครับ/ค่ะ</p>

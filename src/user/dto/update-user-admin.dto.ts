@@ -1,4 +1,12 @@
-import { IsString, IsOptional, MaxLength, IsInt, Min, IsEnum, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MaxLength,
+  IsInt,
+  Min,
+  IsEnum,
+  IsBoolean,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { UserRole } from '../../entities/user.entity';
 

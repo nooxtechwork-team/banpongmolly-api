@@ -10,5 +10,5 @@ export function buildActivityRegistrationEntryCode(
   const idx = (indexDigits || '').trim() || '0000';
   const path = (slugPath ?? '').trim();
   if (!path) return idx;
-  return `${path}${idx}`;
+  return `${path}-${idx}`;
 }

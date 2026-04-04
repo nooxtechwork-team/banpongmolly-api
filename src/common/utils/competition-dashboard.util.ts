@@ -22,6 +22,8 @@ export interface CompetitionParticipantPayload {
   score?: string | number;
   /** ข้อความปุ่มอันดับ 1 (ว่าง = ↑ ขึ้น DIVISION) */
   promotion_cta?: string;
+  /** สไตล์การ์ดแชมป์เฉพาะช่อง (v1–v4) */
+  champion_card_style?: 'v1' | 'v2' | 'v3' | 'v4';
 }
 
 export interface CompetitionClassBlockPayload {

@@ -59,6 +59,19 @@ export interface CheckoutItemRow {
   checkout_remark: string | null;
 }
 
+/** รายการรหัสปลา (entry) สำหรับ autocomplete หน้า config competition dashboard */
+export interface CompetitionEntryPicklistItem {
+  entry_code: string;
+  /** แสดงในเมนู เช่น "CODE · ผู้สมัคร · เลขที่ใบ" */
+  label: string;
+  fish_owner: string;
+  /** มักเป็น farm_name */
+  display_name: string | null;
+  class_code: string;
+  registration_no: string;
+  package_name: string;
+}
+
 @Injectable()
 export class CheckOutService {
   constructor(
@@ -376,6 +389,104 @@ export class CheckOutService {
         pending_items: Math.max(0, items.length - checkedOut),
       },
     };
+  }
+
+  /**
+   * รายการ entry จากใบสมัครที่ชำระเงินแล้วของงานนี้ (ไม่ต้อง check-in)
+   * ใช้เลือกรหัสปลาในแดชบอร์ดสรุปผล — ดึงชื่อผู้สมัคร / farm / แพ็กเกจตามแถวจริง
+   */
+  async listCompetitionEntryPicklist(
+    activityId: number,
+  ): Promise<{ items: CompetitionEntryPicklistItem[] }> {
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId },
+    });
+    if (!activity) throw new NotFoundException('ไม่พบกิจกรรม');
+
+    const rows = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(
+        Order,
+        'ord',
+        'ord.refer_id = reg.id AND ord.type = :type AND ord.status = :status',
+        { type: OrderType.ACTIVITY_REGISTRATION, status: OrderStatus.PAID },
+      )
+      .where('reg.activity_id = :activityId', { activityId })
+      .select([
+        'reg.id AS registration_id',
+        'reg.registration_no AS registration_no',
+        'reg.applicant_name AS applicant_name',
+        'reg.farm_name AS farm_name',
+        'reg.entries_json AS entries_json',
+      ])
+      .orderBy('ord.created_at', 'ASC')
+      .addOrderBy('reg.id', 'ASC')
+      .getRawMany();
+
+    const packageIds: number[] = [];
+    for (const r of rows) {
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      for (const e of entries) {
+        const id = Number(e.package_id);
+        if (!Number.isNaN(id)) packageIds.push(id);
+      }
+    }
+    const packagePathMap = await this.buildPackagePathMap(packageIds);
+    const packageSlugPathMap =
+      await this.buildPackageSlugPathFromLayer2Map(packageIds);
+
+    const rawItems: CompetitionEntryPicklistItem[] = [];
+    for (const r of rows) {
+      const registrationNo = String(r.registration_no ?? '').trim();
+      const applicant = String(r.applicant_name ?? '').trim();
+      const farmRaw = r.farm_name != null ? String(r.farm_name).trim() : '';
+      const farm = farmRaw !== '' ? farmRaw : null;
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      for (const e of entries) {
+        const packageId = Number(e.package_id);
+        if (Number.isNaN(packageId)) continue;
+        const idx =
+          e.index != null && String(e.index).trim() !== ''
+            ? String(e.index).trim()
+            : '-';
+        const stored =
+          e.entry_code != null && String(e.entry_code).trim() !== ''
+            ? String(e.entry_code).trim()
+            : null;
+        const code =
+          stored ??
+          buildActivityRegistrationEntryCode(
+            packageSlugPathMap.get(packageId) ?? null,
+            idx && idx !== '-' ? idx : '0000',
+          );
+        const pkgLabel =
+          packagePathMap.get(packageId) ||
+          `แพ็กเกจ #${Number.isNaN(packageId) ? '-' : packageId}`;
+        const labelParts = [code, applicant || '—'];
+        if (registrationNo) labelParts.push(`เลขที่ ${registrationNo}`);
+        rawItems.push({
+          entry_code: code,
+          label: labelParts.join(' · '),
+          fish_owner: applicant,
+          display_name: farm,
+          class_code: code,
+          registration_no: registrationNo,
+          package_name: pkgLabel,
+        });
+      }
+    }
+
+    const seen = new Set<string>();
+    const items: CompetitionEntryPicklistItem[] = [];
+    for (const it of rawItems) {
+      if (seen.has(it.entry_code)) continue;
+      seen.add(it.entry_code);
+      items.push(it);
+    }
+    items.sort((a, b) =>
+      a.entry_code.localeCompare(b.entry_code, 'th', { numeric: true }),
+    );
+    return { items };
   }
 
   async setItemCheckout(params: {

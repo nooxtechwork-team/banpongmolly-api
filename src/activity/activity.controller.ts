@@ -26,6 +26,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { Audit } from '../common/decorators/audit.decorator';
 import { Activity } from '../entities/activity.entity';
+import { CheckOutService } from '../order/check-out.service';
 
 @Controller('admin/activities')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -34,6 +35,7 @@ export class ActivityController {
     private readonly activityService: ActivityService,
     private readonly activityRewardService: ActivityRewardService,
     private readonly activityTagService: ActivityTagService,
+    private readonly checkOutService: CheckOutService,
   ) {}
 
   @Get()
@@ -70,6 +72,13 @@ export class ActivityController {
   ): Promise<ActivityTagDto[]> {
     await this.activityService.findOne(id);
     return this.activityTagService.getTagsForActivity(id);
+  }
+
+  /** รายการรหัสปลา (entry) จากใบสมัครที่ชำระเงินแล้ว — ใช้ autocomplete หน้า competition dashboard */
+  @Get(':id/competition-entry-picklist')
+  async competitionEntryPicklist(@Param('id', ParseIntPipe) id: number) {
+    await this.activityService.findOne(id);
+    return this.checkOutService.listCompetitionEntryPicklist(id);
   }
 
   @Get(':id')

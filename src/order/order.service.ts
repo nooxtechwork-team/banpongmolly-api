@@ -19,6 +19,8 @@ import * as path from 'path';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 import { CheckInGateway } from './check-in.gateway';
 import { ReceiptPuppeteerService } from './receipt-puppeteer.service';
+import { PaymentConfigService } from '../payment-config/payment-config.service';
+import type { PaymentConfig } from '../entities/payment-config.entity';
 
 /** เพดานสูงสุดต่อ «หนึ่งครั้งที่รันสคริปต์» (RECEIPT_EMAIL_BATCH_LIMIT ไม่เกินค่านี้) */
 const RECEIPT_EMAIL_BATCH_HARD_MAX = 5000;
@@ -42,6 +44,7 @@ export class OrderService {
     private readonly mailService: MailService,
     private readonly checkInGateway: CheckInGateway,
     private readonly receiptPuppeteer: ReceiptPuppeteerService,
+    private readonly paymentConfigService: PaymentConfigService,
   ) {}
 
   private async loadPackageSlugPathFromLayer2ByLeafIds(
@@ -1037,6 +1040,40 @@ export class OrderService {
     return saved;
   }
 
+  private escapeHtmlForReceipt(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /** หัวใบเสร็จ: ชื่อบัญชี / ธนาคาร / ประเภท / เลขบัญชี จาก payment_configs (fallback ถ้ายังไม่ตั้งค่า) */
+  private buildReceiptPaymentCompanyInfoHtml(
+    cfg: PaymentConfig | null,
+  ): string {
+    const esc = (s: string) => this.escapeHtmlForReceipt(s);
+    const lines: string[] = [];
+    if (cfg) {
+      const name = cfg.bank_account_name?.trim();
+      const bank = cfg.bank_name?.trim();
+      const accType = cfg.bank_account_type?.trim();
+      const accNo = cfg.bank_account_no?.trim();
+      if (name) lines.push(esc(name));
+      if (bank) lines.push(`ธนาคาร: ${esc(bank)}`);
+      if (accType) lines.push(`ประเภทบัญชี: ${esc(accType)}`);
+      if (accNo) lines.push(`เลขที่บัญชี: ${esc(accNo)}`);
+    }
+    if (lines.length > 0) {
+      return lines.join('<br />');
+    }
+    return [
+      esc('นาย ชัยวาลย์ วสวานนท์'),
+      `ธนาคาร: ${esc('กสิกรไทย')}`,
+      `เลขที่บัญชี: ${esc('225-8-66347-3')}`,
+    ].join('<br />');
+  }
+
   /**
    * สร้างไฟล์ PDF ใบเสร็จรับเงินจาก HTML template ด้วย Puppeteer
    * ใช้ได้ทั้งฝั่ง admin และฝั่งผู้ใช้ (my orders)
@@ -1112,6 +1149,10 @@ export class OrderService {
     }
     let html = fs.readFileSync(templatePath, 'utf8');
 
+    const paymentCfg = await this.paymentConfigService.getConfig();
+    const paymentCompanyInfo =
+      this.buildReceiptPaymentCompanyInfoHtml(paymentCfg);
+
     const linesHtml = lines.length
       ? lines
           .map(
@@ -1140,7 +1181,8 @@ export class OrderService {
       .replace(/{{customer_name}}/g, customerName)
       .replace(/{{activity_title}}/g, activityTitle || '')
       .replace(/{{total_amount}}/g, formatAmount(Number(order.total_amount)))
-      .replace(/{{lines}}/g, linesHtml);
+      .replace(/{{lines}}/g, linesHtml)
+      .replace(/{{payment_company_info}}/g, paymentCompanyInfo);
 
     return this.receiptPuppeteer.htmlToPdfBuffer(html);
   }
