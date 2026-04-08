@@ -1,10 +1,7 @@
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { AdminGuard } from '../auth/guards/admin.guard';
+import { Body, Controller, Get, Put } from '@nestjs/common';
 import { PaymentConfigService } from './payment-config.service';
 
 @Controller('admin/payment-config')
-@UseGuards(JwtAuthGuard, AdminGuard)
 export class PaymentConfigController {
   constructor(private readonly service: PaymentConfigService) {}
 
