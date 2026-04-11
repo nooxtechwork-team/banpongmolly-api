@@ -20,6 +20,7 @@ export class PaymentConfigController {
       bank_account_name: string | null;
       payment_instructions: string | null;
       promptpay_qr_url: string | null;
+      checkout_request_notify_email: string | null;
     }>,
   ) {
     return this.service.upsertConfig(body);

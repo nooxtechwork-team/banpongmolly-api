@@ -25,6 +25,9 @@ import type { PaymentConfig } from '../entities/payment-config.entity';
 /** เพดานสูงสุดต่อ «หนึ่งครั้งที่รันสคริปต์» (RECEIPT_EMAIL_BATCH_LIMIT ไม่เกินค่านี้) */
 const RECEIPT_EMAIL_BATCH_HARD_MAX = 5000;
 
+/** เพดานส่งอีเมลแจ้งคำขอ checkout ต่อรอบ (CHECKOUT_REQUEST_EMAIL_BATCH_LIMIT ไม่เกินค่านี้) */
+const CHECKOUT_REQUEST_EMAIL_BATCH_HARD_MAX = 500;
+
 @Injectable()
 export class OrderService {
   constructor(
@@ -365,6 +368,7 @@ export class OrderService {
       checked_out_by_name: string | null;
       checkout_requested_at: string | null;
       checkout_request_note: string | null;
+      checkout_request_email_sent_at: string | null;
       checkout_remark: string | null;
     }[];
   }> {
@@ -413,6 +417,7 @@ export class OrderService {
       checked_out_by_name: string | null;
       checkout_requested_at: string | null;
       checkout_request_note: string | null;
+      checkout_request_email_sent_at: string | null;
       checkout_remark: string | null;
     }[] = [];
 
@@ -495,6 +500,9 @@ export class OrderService {
                     : null,
                 checkout_requested_at: optIso(e.checkout_requested_at),
                 checkout_request_note: optNote(e.checkout_request_note),
+                checkout_request_email_sent_at: optIso(
+                  e.checkout_request_email_sent_at,
+                ),
                 checkout_remark: optNote(e.checkout_remark),
               };
             });
@@ -1363,6 +1371,256 @@ export class OrderService {
       }
     }
     return { candidates: ids.length, sent, skipped, failed };
+  }
+
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /** แยกอีเมลผู้รับแจ้งคำขอ checkout หลายที่อยู่ (comma / ; / ขึ้นบรรทัด) */
+  private parseCheckoutRequestNotifyRecipients(
+    raw: string | null | undefined,
+  ): string[] {
+    const s = raw?.trim();
+    if (!s) return [];
+    const parts = s
+      .split(/[\s,;]+/u)
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of parts) {
+      const key = p.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  }
+
+  /**
+   * รายการ { registrationId, entryIndex } ที่มีคำขอ checkout แต่ยังไม่ส่งอีเมลแจ้งเจ้าหน้าที่
+   */
+  async findPendingCheckoutRequestEmailJobs(
+    limit: number,
+  ): Promise<{ registrationId: number; entryIndex: string }[]> {
+    const safeLimit = Math.min(
+      Math.max(1, limit),
+      CHECKOUT_REQUEST_EMAIL_BATCH_HARD_MAX,
+    );
+    const scanCap = Math.min(2000, safeLimit * 25);
+    const regs = await this.registrationRepository
+      .createQueryBuilder('r')
+      .innerJoin(Order, 'o', 'o.refer_id = r.id')
+      .where('o.type = :otype', { otype: OrderType.ACTIVITY_REGISTRATION })
+      .andWhere('o.status = :paid', { paid: OrderStatus.PAID })
+      .andWhere('r.checked_in_at IS NOT NULL')
+      .andWhere("r.entries_json LIKE :pat", {
+        pat: '%checkout_requested_at%',
+      })
+      .orderBy('r.updated_at', 'ASC')
+      .take(scanCap)
+      .getMany();
+
+    const jobs: { registrationId: number; entryIndex: string }[] = [];
+    for (const r of regs) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(r.entries_json || '[]');
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed)) continue;
+      for (const e of parsed as Record<string, unknown>[]) {
+        const idx = e.index != null ? String(e.index).trim() : '';
+        if (!idx) continue;
+        const reqOk =
+          e.checkout_requested_at != null &&
+          String(e.checkout_requested_at).trim() !== '';
+        const sent =
+          e.checkout_request_email_sent_at != null &&
+          String(e.checkout_request_email_sent_at).trim() !== '';
+        const out =
+          e.checked_out_at != null && String(e.checked_out_at).trim() !== '';
+        if (reqOk && !sent && !out) {
+          jobs.push({ registrationId: r.id, entryIndex: idx });
+          if (jobs.length >= safeLimit) return jobs;
+        }
+      }
+    }
+    return jobs;
+  }
+
+  /**
+   * ส่งอีเมลแจ้งเจ้าหน้าที่เรื่องคำขอ checkout ราย entry — ตั้ง checkout_request_email_sent_at เมื่อส่ง SMTP สำเร็จ
+   * @returns true เมื่อส่งสำเร็จ, false เมื่อข้าม (ไม่มีอีเมลปลายทาง / ไม่มีคิว / สถานะไม่พร้อม)
+   */
+  async sendCheckoutRequestNotificationEmail(
+    registrationId: number,
+    entryIndex: string,
+  ): Promise<boolean> {
+    const cfg = await this.paymentConfigService.getConfig();
+    const recipients = this.parseCheckoutRequestNotifyRecipients(
+      cfg?.checkout_request_notify_email,
+    );
+    if (!recipients.length) {
+      return false;
+    }
+    const to = recipients.join(', ');
+
+    const target = (entryIndex || '').trim();
+    if (!target) {
+      return false;
+    }
+
+    const registration = await this.registrationRepository.findOne({
+      where: { id: registrationId },
+    });
+    if (!registration) {
+      throw new NotFoundException('ไม่พบใบสมัคร');
+    }
+
+    const order = await this.orderRepository.findOne({
+      where: {
+        refer_id: registrationId,
+        type: OrderType.ACTIVITY_REGISTRATION,
+      },
+    });
+    if (!order || order.status !== OrderStatus.PAID) {
+      return false;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(registration.entries_json || '[]');
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(parsed)) {
+      return false;
+    }
+    const entries = parsed as Record<string, unknown>[];
+    const row = entries.find((e) => {
+      const idx = e.index != null ? String(e.index).trim() : '';
+      return idx === target;
+    });
+    if (!row) {
+      return false;
+    }
+    const reqAt = row.checkout_requested_at;
+    const sentAt = row.checkout_request_email_sent_at;
+    const checkedOut = row.checked_out_at;
+    if (
+      reqAt == null ||
+      String(reqAt).trim() === '' ||
+      (sentAt != null && String(sentAt).trim() !== '') ||
+      (checkedOut != null && String(checkedOut).trim() !== '')
+    ) {
+      return false;
+    }
+
+    const noteRaw =
+      row.checkout_request_note != null
+        ? String(row.checkout_request_note).trim()
+        : '';
+    const activity = await this.activityRepository.findOne({
+      where: { id: registration.activity_id },
+    });
+    const activityTitle = activity?.title?.trim() || 'กิจกรรม';
+    const applicantName = registration.applicant_name?.trim() || '—';
+    const applicantEmail =
+      registration.email?.trim() ||
+      order.customer_email?.trim() ||
+      '—';
+
+    const subject = `[คำขอ checkout] ${order.order_no} · ${activityTitle}`;
+    const noteBlock =
+      noteRaw.length > 0
+        ? `<p><strong>ข้อความจากผู้สมัคร:</strong><br>${this.escapeHtml(
+            noteRaw,
+          ).replace(/\n/g, '<br>')}</p>`
+        : '';
+    const html = `<p>มีคำขอให้ดำเนินการ <strong>checkout (คืนปลา)</strong> สำหรับรายการสมัคร</p>
+<ul>
+<li><strong>งาน:</strong> ${this.escapeHtml(activityTitle)}</li>
+<li><strong>เลขคำสั่งซื้อ:</strong> ${this.escapeHtml(order.order_no)}</li>
+<li><strong>รายการ (entry index):</strong> ${this.escapeHtml(target)}</li>
+<li><strong>ผู้สมัคร:</strong> ${this.escapeHtml(applicantName)}</li>
+<li><strong>อีเมลติดต่อ:</strong> ${this.escapeHtml(applicantEmail)}</li>
+</ul>
+${noteBlock}
+<p style="font-size:12px;color:#666">ส่งอัตโนมัติจากระบบ Banpong Molly — กรุณาดำเนินการในแผง Check-out</p>`;
+    const text = [
+      'มีคำขอให้ดำเนินการ checkout (คืนปลา)',
+      `งาน: ${activityTitle}`,
+      `เลขคำสั่งซื้อ: ${order.order_no}`,
+      `รายการ (entry index): ${target}`,
+      `ผู้สมัคร: ${applicantName}`,
+      `อีเมลติดต่อ: ${applicantEmail}`,
+      noteRaw ? `ข้อความจากผู้สมัคร: ${noteRaw}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const mailed = await this.mailService.sendRawEmail({
+      to,
+      subject,
+      text,
+      html,
+    });
+
+    if (mailed) {
+      const nowIso = new Date().toISOString();
+      const next = entries.map((e) => {
+        const idx = e.index != null ? String(e.index).trim() : '';
+        if (idx !== target) return e;
+        return {
+          ...e,
+          checkout_request_email_sent_at: nowIso,
+        };
+      });
+      registration.entries_json = JSON.stringify(next);
+      await this.registrationRepository.save(registration);
+    }
+
+    return mailed;
+  }
+
+  /**
+   * กวาดส่งอีเมลแจ้งคำขอ checkout (เรียกจากสคริปต์ + cron)
+   * skipped = ไม่ส่งจริง (เช่น ยังไม่ตั้งอีเมลผู้รับ / SMTP ยังไม่พร้อม)
+   */
+  async processPendingCheckoutRequestEmailBatch(limit?: number): Promise<{
+    candidates: number;
+    sent: number;
+    skipped: number;
+    failed: number;
+  }> {
+    const fromEnv = Number(process.env.CHECKOUT_REQUEST_EMAIL_BATCH_LIMIT);
+    const batchLimit =
+      limit ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 50);
+    const jobs = await this.findPendingCheckoutRequestEmailJobs(batchLimit);
+    let sent = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const j of jobs) {
+      try {
+        const ok = await this.sendCheckoutRequestNotificationEmail(
+          j.registrationId,
+          j.entryIndex,
+        );
+        if (ok) sent++;
+        else skipped++;
+      } catch {
+        failed++;
+      }
+    }
+    return { candidates: jobs.length, sent, skipped, failed };
   }
 
   async findSponsorOrderBySponsorId(sponsorId: number): Promise<Order | null> {

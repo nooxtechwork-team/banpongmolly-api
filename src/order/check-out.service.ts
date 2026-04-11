@@ -24,6 +24,7 @@ type EntryJsonRow = {
   checked_out_by_name?: string | null;
   checkout_requested_at?: string | null;
   checkout_request_note?: string | null;
+  checkout_request_email_sent_at?: string | null;
   checkout_remark?: string | null;
 };
 
@@ -55,6 +56,8 @@ export interface CheckoutItemRow {
   /** ผู้ใช้ขอให้ดำเนินการ checkout */
   checkout_requested_at: string | null;
   checkout_request_note: string | null;
+  /** เวลาที่ส่งอีเมลแจ้งเจ้าหน้าที่ (สคริปต์ cron) สำเร็จ */
+  checkout_request_email_sent_at: string | null;
   /** หมายเหตุจากแอดมินตอนยืนยัน checkout */
   checkout_remark: string | null;
 }
@@ -342,6 +345,9 @@ export class CheckOutService {
               String(e.checkout_request_note).trim() !== ''
                 ? String(e.checkout_request_note).trim()
                 : null,
+            checkout_request_email_sent_at: e.checkout_request_email_sent_at
+              ? String(e.checkout_request_email_sent_at)
+              : null,
             checkout_remark:
               e.checkout_remark != null &&
               String(e.checkout_remark).trim() !== ''

@@ -132,3 +132,39 @@ pnpm run script:send-pending-receipt-emails
 1 วันมี 1,440 นาที — ถ้าแต่ละนาทีรันจบทันและเคลียร์ได้ 5,000 ออเดอร์ **โคว้าทฤษฎีสูงมาก**; ในทางปฏิบัติจำกัดด้วยความเร็ว Puppeteer + SMTP และ `flock` จะกันซ้ำเมื่อรอบก่อนยังไม่จบ
 
 `POST /admin/orders/:id/send-receipt` ไม่สร้าง PDF ใน request — แค่คิวให้ cron โดยเคลียร์ `receipt_email_sent_at` (ใช้เมื่อต้องการให้ส่งซ้ำหลังเคยส่งแล้ว)
+
+## ส่งอีเมลแจ้งคำขอ checkout (คืนปลา) แบบกวาด (cron)
+
+เมื่อผู้สมัครกดขอแจ้งเตือนคืนปลา ระบบจะบันทึก `checkout_requested_at` ใน `activity_registrations.entries_json` — สคริปต์ cron จะส่งอีเมลไปยังที่ตั้งในแอดมิน และตั้ง `checkout_request_email_sent_at` ใน entry เดียวกันเมื่อส่ง SMTP สำเร็จ
+
+1. เพิ่มคอลัมน์ในฐานข้อมูล (ถ้าไม่ใช้ TypeORM sync):
+
+```sql
+ALTER TABLE payment_configs ADD COLUMN checkout_request_notify_email TEXT NULL;
+```
+
+ถ้ามีคอลัมน์แบบ `VARCHAR(255)` อยู่แล้วและต้องการให้รองรับหลายอีเมลยาวขึ้น:
+
+```sql
+ALTER TABLE payment_configs MODIFY COLUMN checkout_request_notify_email TEXT NULL;
+```
+
+ระบุได้หลายอีเมลในช่องเดียว คั่นด้วยเครื่องหมายจุลภาค (`,`) หรือ `;` หรือขึ้นบรรทัดใหม่ — ระบบจะส่งหนึ่งฉบับไปยังทุกที่อยู่ (To รวม)
+
+2. ตั้งค่า SMTP ใน `.env` (ชุดเดียวกับใบเสร็จ) และกรอก **อีเมลผู้รับแจ้งคำขอ checkout** ในหน้าแอดมิน **ตั้งค่าอีเมลคำขอ checkout**
+
+3. รันครั้งเดียวทดสอบ:
+
+```bash
+pnpm run script:send-pending-checkout-request-emails
+```
+
+4. ตัวอย่าง crontab — **รันทุก 1 นาที**
+
+ตั้ง `CHECKOUT_REQUEST_EMAIL_BATCH_LIMIT=500` ใน `.env` ได้ (เพดานในโค้ดไม่เกิน 500 ต่อรอบ)
+
+```cron
+* * * * * flock -n /tmp/checkout-request-mail.lock -c 'cd /absolute/path/to/api && pnpm run script:send-pending-checkout-request-emails >> /var/log/checkout-request-mail.log 2>&1'
+```
+
+ถ้ายังไม่ตั้ง `checkout_request_notify_email` หรือ SMTP ยังไม่พร้อม สคริปต์จะนับเป็น `skipped` และจะลองใหม่รอบถัดไป (ยังไม่ stamp `checkout_request_email_sent_at`)
