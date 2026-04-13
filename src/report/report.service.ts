@@ -100,6 +100,16 @@ export class ReportService {
     return Number.isNaN(t) ? 0 : t;
   }
 
+  /** เวลาสมัครเร็วสุดของกลุ่ม (ใช้เรียงลำดับผู้สมัคร — คนสมัครก่อนอยู่บน / PDF หน้าแรก) */
+  private earliestRegisteredAtMs(group: ActivityAttendanceUserGroup): number {
+    let min = Infinity;
+    for (const s of group.registrations) {
+      const t = new Date(s.registered_at).getTime();
+      if (!Number.isNaN(t) && t < min) min = t;
+    }
+    return Number.isFinite(min) ? min : 0;
+  }
+
   private async buildPackageNamePathMap(
     packageIds: number[],
   ): Promise<Map<number, string>> {
@@ -528,11 +538,12 @@ export class ReportService {
       });
     }
 
-    users.sort(
-      (a, b) =>
-        this.registrationSortTimeMs(b.registrations[0]) -
-        this.registrationSortTimeMs(a.registrations[0]),
-    );
+    users.sort((a, b) => {
+      const da = this.earliestRegisteredAtMs(a);
+      const db = this.earliestRegisteredAtMs(b);
+      if (da !== db) return da - db;
+      return a.group_key.localeCompare(b.group_key);
+    });
 
     return {
       activity: { id: activity.id, title: activity.title },
