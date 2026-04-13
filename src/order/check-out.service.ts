@@ -245,6 +245,7 @@ export class CheckOutService {
       total_items: number;
       checked_out_items: number;
       pending_items: number;
+      requested_items: number;
     };
   }> {
     const activity = await this.activityRepository.findOne({
@@ -358,6 +359,12 @@ export class CheckOutService {
       );
     }
 
+    const allItems = items;
+    const allCheckedOut = allItems.filter((x) => x.checked_out).length;
+    const allRequested = allItems.filter(
+      (x) => !x.checked_out && !!x.checkout_requested_at,
+    ).length;
+
     const q = (filters?.search || '').trim().toLowerCase();
     if (q) {
       items = items.filter(
@@ -385,14 +392,14 @@ export class CheckOutService {
       items = items.filter((x) => !x.checked_out && !!x.checkout_requested_at);
     }
 
-    const checkedOut = items.filter((x) => x.checked_out).length;
     return {
       activity: { id: activity.id, title: activity.title },
       items,
       totals: {
-        total_items: items.length,
-        checked_out_items: checkedOut,
-        pending_items: Math.max(0, items.length - checkedOut),
+        total_items: allItems.length,
+        checked_out_items: allCheckedOut,
+        pending_items: Math.max(0, allItems.length - allCheckedOut),
+        requested_items: allRequested,
       },
     };
   }

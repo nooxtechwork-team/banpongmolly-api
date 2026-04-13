@@ -24,6 +24,8 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
+    /** ให้เบราว์เซอร์ส่ง Content-Disposition ถึง JS (axios) เวลาโหลด blob PDF ข้าม origin */
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // Increase JSON and URL-encoded body size limits to handle large payloads

@@ -56,6 +56,6 @@ import { PaymentConfigModule } from '../payment-config/payment-config.module';
     DashboardAdminController,
     CheckOutController,
   ],
-  exports: [OrderService, CheckOutService],
+  exports: [OrderService, CheckOutService, ReceiptPuppeteerService],
 })
 export class OrderModule {}

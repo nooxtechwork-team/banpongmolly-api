@@ -3,6 +3,9 @@
  */
 export interface CompetitionParticipantPayload {
   image_url?: string | null;
+  reward_image_url?: string | null;
+  class_reward_image_url?: string | null;
+  division_reward_image_url?: string | null;
   fish_owner?: string;
   /** ชื่อเต็มแสดงใหญ่ (ถ้าว่างใช้ fish_owner) */
   display_name?: string;
