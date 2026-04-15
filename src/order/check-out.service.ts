@@ -68,7 +68,9 @@ export interface CompetitionEntryPicklistItem {
   /** แสดงในเมนู เช่น "CODE · ผู้สมัคร · เลขที่ใบ" */
   label: string;
   fish_owner: string;
-  /** มักเป็น farm_name */
+  /** ชื่อฟาร์ม (ตรงกับ reg.farm_name) */
+  farm_name: string | null;
+  /** คงไว้เพื่อ backward compatibility */
   display_name: string | null;
   class_code: string;
   registration_no: string;
@@ -481,6 +483,7 @@ export class CheckOutService {
           entry_code: code,
           label: labelParts.join(' · '),
           fish_owner: applicant,
+          farm_name: farm,
           display_name: farm,
           class_code: code,
           registration_no: registrationNo,

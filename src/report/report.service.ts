@@ -8,6 +8,7 @@ import { Activity } from '../entities/activity.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
+import { User } from '../entities/user.entity';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 
 export interface ActivityAttendanceActivitySummary {
@@ -26,9 +27,13 @@ export interface ActivityAttendanceEntryRow {
   breed_label: string;
 }
 
-/** หนึ่งใบสมัครภายใต้ผู้ใช้เดียวกัน (ไม่ส่งรหัสสมัคร/order ออก API) */
+/** หนึ่งใบสมัครภายใต้ผู้ใช้เดียวกัน */
 export interface ActivityAttendanceRegistrationSlice {
   registration_id: number;
+  order_no: string | null;
+  applicant_name: string;
+  applicant_phone: string | null;
+  farm_name: string | null;
   /** null = ยังไม่เช็คอิน */
   checked_in_at: string | null;
   /** ใช้เรียงลำดับ / แสดงเมื่อยังไม่เช็คอิน */
@@ -41,6 +46,10 @@ export interface ActivityAttendanceUserGroup {
   user_id: number | null;
   /** คีย์สำหรับ UI */
   group_key: string;
+  user_name: string | null;
+  user_phone: string | null;
+  user_farm_name: string | null;
+  user_email: string | null;
   applicant_name: string;
   applicant_phone: string | null;
   farm_name: string | null;
@@ -423,6 +432,7 @@ export class ReportService {
           paid: OrderStatus.PAID,
         },
       )
+      .leftJoin(User, 'u', 'u.id = reg.user_id AND u.deleted_at IS NULL')
       .where('reg.activity_id = :aid', { aid: activityId })
       .select('reg.id', 'registration_id')
       .addSelect('reg.registration_no', 'registration_no')
@@ -435,6 +445,10 @@ export class ReportService {
       .addSelect('reg.checked_in_at', 'checked_in_at')
       .addSelect('reg.created_at', 'registration_created_at')
       .addSelect('o.order_no', 'order_no')
+      .addSelect('u.fullname', 'user_fullname')
+      .addSelect('u.phone_number', 'user_phone')
+      .addSelect('u.farm_name', 'user_farm_name')
+      .addSelect('u.email', 'user_email')
       .orderBy('reg.created_at', 'DESC')
       .getRawMany();
 
@@ -471,6 +485,24 @@ export class ReportService {
 
       const slice: ActivityAttendanceRegistrationSlice = {
         registration_id: Number(r.registration_id),
+        order_no:
+          r.order_no != null && String(r.order_no).trim() !== ''
+            ? String(r.order_no).trim()
+            : null,
+        applicant_name:
+          this.stripCodesFromApplicantName(
+            String(r.applicant_name ?? ''),
+            String(r.registration_no ?? ''),
+            String(r.order_no ?? ''),
+          ).trim() || 'ไม่ระบุชื่อ',
+        applicant_phone:
+          r.applicant_phone != null && String(r.applicant_phone).trim() !== ''
+            ? String(r.applicant_phone).trim()
+            : null,
+        farm_name:
+          r.farm_name != null && String(r.farm_name).trim() !== ''
+            ? String(r.farm_name).trim()
+            : null,
         checked_in_at: checkedIso,
         registered_at: registeredIso,
         entries: this.buildEntryRowsForRegistration(
@@ -497,7 +529,7 @@ export class ReportService {
     for (const acc of byKey.values()) {
       acc.slices.sort(
         (a, b) =>
-          this.registrationSortTimeMs(b) - this.registrationSortTimeMs(a),
+          this.registrationSortTimeMs(a) - this.registrationSortTimeMs(b),
       );
       const primaryId = acc.slices[0]?.registration_id;
       const primaryRaw = (raws || []).find(
@@ -507,6 +539,10 @@ export class ReportService {
             applicant_phone?: unknown;
             farm_name?: unknown;
             applicant_name?: unknown;
+            user_fullname?: unknown;
+            user_phone?: unknown;
+            user_farm_name?: unknown;
+            user_email?: unknown;
             registration_no?: unknown;
             order_no?: unknown;
           }
@@ -524,6 +560,30 @@ export class ReportService {
       users.push({
         user_id: acc.user_id,
         group_key: acc.group_key,
+        user_name:
+          primaryRaw?.user_fullname != null &&
+          String(primaryRaw.user_fullname).trim() !== ''
+            ? String(primaryRaw.user_fullname).trim()
+            : nameDisplay || null,
+        user_phone:
+          primaryRaw?.user_phone != null &&
+          String(primaryRaw.user_phone).trim() !== ''
+            ? String(primaryRaw.user_phone).trim()
+            : phoneRaw != null && String(phoneRaw).trim() !== ''
+              ? String(phoneRaw).trim()
+              : null,
+        user_farm_name:
+          primaryRaw?.user_farm_name != null &&
+          String(primaryRaw.user_farm_name).trim() !== ''
+            ? String(primaryRaw.user_farm_name).trim()
+            : farmRaw != null && String(farmRaw).trim() !== ''
+              ? String(farmRaw).trim()
+              : null,
+        user_email:
+          primaryRaw?.user_email != null &&
+          String(primaryRaw.user_email).trim() !== ''
+            ? String(primaryRaw.user_email).trim()
+            : null,
         applicant_name: nameDisplay || 'ไม่ระบุชื่อ',
         applicant_phone:
           phoneRaw != null && String(phoneRaw).trim() !== ''
@@ -578,6 +638,39 @@ export class ReportService {
     }
   }
 
+  private formatAttendanceRegisteredAt(iso: string): string {
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return String(iso);
+      return d.toLocaleString('th-TH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return String(iso);
+    }
+  }
+
+  private sortActivityAttendanceEntries(
+    rows: ActivityAttendanceEntryRow[],
+  ): ActivityAttendanceEntryRow[] {
+    return [...rows].sort((a, b) => {
+      const aMatch = /(\d+)$/.exec(a.entry_code);
+      const bMatch = /(\d+)$/.exec(b.entry_code);
+      const aNum = aMatch ? Number(aMatch[1]) : Number.NaN;
+      const bNum = bMatch ? Number(bMatch[1]) : Number.NaN;
+      const aHasNum = Number.isFinite(aNum);
+      const bHasNum = Number.isFinite(bNum);
+      if (aHasNum && bHasNum && aNum !== bNum) return aNum - bNum;
+      if (aHasNum && !bHasNum) return -1;
+      if (!aHasNum && bHasNum) return 1;
+      return a.entry_code.localeCompare(b.entry_code);
+    });
+  }
+
   private buildActivityAttendancePdfBodyHtml(
     users: ActivityAttendanceUserGroup[],
   ): string {
@@ -588,33 +681,54 @@ export class ReportService {
       parts.push(`<div class="${blockCls}">`);
       parts.push('<div class="user-head">');
       parts.push(
-        `<div class="user-head-row user-head-row--applicant"><span class="user-head-key">ผู้สมัคร:</span> <span class="user-head-value">${esc(g.applicant_name)}</span></div>`,
+        `<div class="user-head-row user-head-row--applicant"><span class="user-head-key">User:</span> <span class="user-head-value">${esc(g.user_name || 'ไม่ระบุชื่อ')}</span></div>`,
       );
       parts.push(
-        `<div class="user-head-row"><span class="user-head-key">เบอร์โทร:</span> <span class="user-head-value">${esc(g.applicant_phone || '—')}</span></div>`,
+        `<div class="user-head-row"><span class="user-head-key">เบอร์:</span> <span class="user-head-value">${esc(g.user_phone || '—')}</span></div>`,
       );
       parts.push(
-        `<div class="user-head-row"><span class="user-head-key">ฟาร์ม:</span> <span class="user-head-value">${esc(g.farm_name || '—')}</span></div>`,
+        `<div class="user-head-row"><span class="user-head-key">ฟาร์ม:</span> <span class="user-head-value">${esc(g.user_farm_name || '—')}</span></div>`,
+      );
+      parts.push(
+        `<div class="user-head-row"><span class="user-head-key">อีเมล:</span> <span class="user-head-value">${esc(g.user_email || '—')}</span></div>`,
       );
       parts.push('</div>');
-      parts.push('<table><thead><tr>');
-      parts.push(
-        '<th style="width:36px;">ลำดับ</th><th>รหัสปลา</th><th>กลุ่มการประกวด</th><th>ประเภทการแข่งขัน</th><th>หมวดหมู่ปลา</th><th>คลาสการแข่งขัน</th>',
-      );
-      parts.push('</tr></thead><tbody>');
-      const rows = g.registrations.flatMap((reg) => reg.entries);
-      if (!rows.length) {
+
+      for (const reg of g.registrations) {
         parts.push(
-          '<tr><td colspan="6" style="text-align:center;color:#6b7280;">ไม่มีรายการ</td></tr>',
+          '<div style="margin-top:8px;border:1px solid #111111;border-radius:6px;overflow:hidden;">',
         );
-      } else {
-        rows.forEach((row, i) => {
+        parts.push(
+          '<div style="padding:8px 10px;background:#ffffff;border-bottom:1px solid #111111;font-size:11px;line-height:1.5;color:#000000;">',
+        );
+        parts.push(
+          `<div><strong>Order:</strong> ${esc(reg.order_no || `#${reg.registration_id}`)} | <strong>ผู้สมัคร:</strong> ${esc(reg.applicant_name)} | <strong>เบอร์โทร:</strong> ${esc(reg.applicant_phone || '—')} | <strong>ฟาร์ม:</strong> ${esc(reg.farm_name || '—')}</div>`,
+        );
+        parts.push(
+          `<div style="margin-top:2px;color:#000000;"><strong>สมัครเมื่อ:</strong> ${esc(this.formatAttendanceRegisteredAt(reg.registered_at))} | <strong>เช็คอิน:</strong> ${esc(this.formatAttendanceCheckedIn(reg.checked_in_at))}</div>`,
+        );
+        parts.push('</div>');
+
+        parts.push('<table><thead><tr>');
+        parts.push(
+          '<th style="width:36px;">ลำดับ</th><th>รหัสปลา</th><th>กลุ่มการประกวด</th><th>ประเภทการแข่งขัน</th><th>หมวดหมู่ปลา</th><th>คลาสการแข่งขัน</th>',
+        );
+        parts.push('</tr></thead><tbody>');
+        const rows = this.sortActivityAttendanceEntries(reg.entries);
+        if (!rows.length) {
           parts.push(
-            `<tr><td>${esc(String(i + 1))}</td><td style="font-family:ui-monospace,monospace;font-size:9px;">${esc(row.entry_code)}</td><td>${esc(row.group_label)}</td><td>${esc(row.class_label)}</td><td>${esc(row.type_label)}</td><td>${esc(row.breed_label)}</td></tr>`,
+            '<tr><td colspan="6" style="text-align:center;color:#6b7280;">ไม่มีรายการ</td></tr>',
           );
-        });
+        } else {
+          rows.forEach((row, i) => {
+            parts.push(
+              `<tr><td>${esc(String(i + 1))}</td><td style="font-family:ui-monospace,monospace;font-size:9px;">${esc(row.entry_code)}</td><td>${esc(row.group_label)}</td><td>${esc(row.class_label)}</td><td>${esc(row.type_label)}</td><td>${esc(row.breed_label)}</td></tr>`,
+            );
+          });
+        }
+        parts.push('</tbody></table>');
+        parts.push('</div>');
       }
-      parts.push('</tbody></table>');
       parts.push('</div>');
     });
     return parts.join('\n');
