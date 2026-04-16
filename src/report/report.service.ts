@@ -709,9 +709,11 @@ export class ReportService {
         );
         parts.push('</div>');
 
-        parts.push('<table><thead><tr>');
         parts.push(
-          '<th style="width:36px;">ลำดับ</th><th>รหัสปลา</th><th>กลุ่มการประกวด</th><th>ประเภทการแข่งขัน</th><th>หมวดหมู่ปลา</th><th>คลาสการแข่งขัน</th>',
+          '<table style="table-layout:fixed;"><colgroup><col style="width:50px;"><col style="width:60px;"><col style="width:18%;"><col style="width:22%;"><col style="width:30%;"><col style="width:17%;"></colgroup><thead><tr>',
+        );
+        parts.push(
+          '<th>ลำดับ</th><th>รหัสปลา</th><th>กลุ่มการประกวด</th><th>ประเภทการแข่งขัน</th><th>หมวดหมู่ปลา</th><th>คลาสการแข่งขัน</th>',
         );
         parts.push('</tr></thead><tbody>');
         const rows = this.sortActivityAttendanceEntries(reg.entries);
@@ -722,7 +724,7 @@ export class ReportService {
         } else {
           rows.forEach((row, i) => {
             parts.push(
-              `<tr><td>${esc(String(i + 1))}</td><td style="font-family:ui-monospace,monospace;font-size:9px;">${esc(row.entry_code)}</td><td>${esc(row.group_label)}</td><td>${esc(row.class_label)}</td><td>${esc(row.type_label)}</td><td>${esc(row.breed_label)}</td></tr>`,
+              `<tr><td>${esc(String(i + 1))}</td><td style="font-family:ui-monospace,monospace;font-size:9px;white-space:nowrap;word-break:normal;">${esc(row.entry_code)}</td><td>${esc(row.group_label)}</td><td>${esc(row.class_label)}</td><td>${esc(row.type_label)}</td><td>${esc(row.breed_label)}</td></tr>`,
             );
           });
         }
