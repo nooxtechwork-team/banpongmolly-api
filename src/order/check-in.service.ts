@@ -13,6 +13,8 @@ import { CheckInGateway } from './check-in.gateway';
 export interface CheckInLookupResult {
   registration_id: number;
   registration_no: string;
+  /** เลขที่ Order ที่ผูกกับใบสมัคร (ถ้ามี) */
+  order_no: string | null;
   applicant_name: string;
   activity_id: number;
   activity_title: string;
@@ -119,6 +121,10 @@ export class CheckInService {
     return {
       registration_id: reg.id,
       registration_no: reg.registration_no,
+      order_no:
+        order?.order_no != null && String(order.order_no).trim() !== ''
+          ? String(order.order_no).trim()
+          : null,
       applicant_name: reg.applicant_name,
       activity_id: reg.activity_id,
       activity_title: activity?.title ?? '',

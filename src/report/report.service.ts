@@ -62,6 +62,23 @@ export interface ActivityAttendanceDetailResponse {
   users: ActivityAttendanceUserGroup[];
 }
 
+/** สรุปจำนวนรายการสมัครต่อ Package/Plan — เฉพาะ Order ชำระเงินแล้ว */
+export interface ActivityPaidPackageCountRow {
+  package_id: number;
+  slug: string | null;
+  /** ชื่อแบบลำดับชั้น (กลุ่ม / คลาส / …) ให้ตรงกับรายงานผู้เข้าร่วม */
+  path_label: string;
+  /** ผลรวม quantity จาก entries_json ต่อ package */
+  item_count: number;
+}
+
+export interface ActivityPaidPackageCountsResponse {
+  activity: { id: number; title: string };
+  rows: ActivityPaidPackageCountRow[];
+  /** ผลรวมรายการทั้งหมดในกิจกรรม (หลังคูณ quantity) */
+  total_items: number;
+}
+
 type EntryJsonRow = {
   index?: string;
   package_id?: number;
@@ -609,6 +626,213 @@ export class ReportService {
       activity: { id: activity.id, title: activity.title },
       users,
     };
+  }
+
+  /**
+   * จำนวนรายการสมัครต่อคลาส/แพ็กเกจ (ผลรวม quantity ใน entries_json)
+   * เฉพาะการสมัครที่มี Order ประเภท activity_registration และสถานะ paid
+   */
+  async getActivityPaidPackageItemCounts(
+    activityId: number,
+  ): Promise<ActivityPaidPackageCountsResponse> {
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId },
+    });
+    if (!activity) {
+      throw new NotFoundException('ไม่พบกิจกรรม');
+    }
+
+    const raws = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(
+        Order,
+        'o',
+        'o.refer_id = reg.id AND o.type = :otype AND o.status = :paid',
+        {
+          otype: OrderType.ACTIVITY_REGISTRATION,
+          paid: OrderStatus.PAID,
+        },
+      )
+      .where('reg.activity_id = :aid', { aid: activityId })
+      .select('reg.entries_json', 'entries_json')
+      .getRawMany();
+
+    const countByPackage = new Map<number, number>();
+    const packageIds: number[] = [];
+
+    for (const r of raws || []) {
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      for (const e of entries) {
+        const pid = Number(e.package_id);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        const qty = Math.max(1, Number(e.quantity) || 1);
+        countByPackage.set(pid, (countByPackage.get(pid) ?? 0) + qty);
+        packageIds.push(pid);
+      }
+    }
+
+    const uniqueIds = [...new Set(packageIds)];
+    const pathMap =
+      uniqueIds.length > 0
+        ? await this.buildPackageNamePathMap(uniqueIds)
+        : new Map<number, string>();
+
+    const packages =
+      uniqueIds.length > 0
+        ? await this.activityPackageRepository.find({
+            where: { id: In(uniqueIds), deleted_at: IsNull() },
+          })
+        : [];
+    const slugById = new Map<number, string | null>();
+    for (const p of packages) {
+      slugById.set(p.id, p.slug ?? null);
+    }
+
+    let totalItems = 0;
+    const rows: ActivityPaidPackageCountRow[] = [];
+    for (const [packageId, itemCount] of countByPackage) {
+      totalItems += itemCount;
+      rows.push({
+        package_id: packageId,
+        slug: slugById.get(packageId) ?? null,
+        path_label:
+          pathMap.get(packageId) ??
+          packages.find((x) => x.id === packageId)?.name ??
+          `Package #${packageId}`,
+        item_count: itemCount,
+      });
+    }
+
+    rows.sort((a, b) => {
+      const sa = a.slug?.trim() ?? '';
+      const sb = b.slug?.trim() ?? '';
+      if (sa && !sb) return -1;
+      if (!sa && sb) return 1;
+      const c = sa.localeCompare(sb, 'th', { numeric: true });
+      if (c !== 0) return c;
+      return a.path_label.localeCompare(b.path_label, 'th');
+    });
+
+    return {
+      activity: { id: activity.id, title: activity.title },
+      rows,
+      total_items: totalItems,
+    };
+  }
+
+  private filterPackageCountRowsBySearch(
+    rows: ActivityPaidPackageCountRow[],
+    search?: string,
+  ): ActivityPaidPackageCountRow[] {
+    const q = search?.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) => {
+      const slug = (row.slug ?? '').toLowerCase();
+      const pathLabel = row.path_label.toLowerCase();
+      const idStr = String(row.package_id);
+      return slug.includes(q) || pathLabel.includes(q) || idStr.includes(q);
+    });
+  }
+
+  private sanitizeExcelFilenameBase(raw: string): string {
+    const s = String(raw ?? '')
+      .trim()
+      .replace(/[/\\:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
+      .trim();
+    return s.length > 0 ? s : 'activity';
+  }
+
+  /** ความสูงแถวโดยประมาณเมื่อเปิด wrap ใน Excel (หน่วยความกว้างคอลัมน์ของ Excel ≈ ตัวอักษรต่อบรรทัด) */
+  private excelApproxRowHeightForWrappedText(
+    text: string,
+    columnWidthUnits: number,
+  ): number {
+    const s = String(text ?? '');
+    if (!s) return 18;
+    const charsPerLine = Math.max(28, Math.floor(columnWidthUnits * 0.92));
+    const extraLines = (s.match(/\n/g) || []).length;
+    const lines = Math.max(1, Math.ceil(s.length / charsPerLine) + extraLines);
+    const lineHeight = 15;
+    return Math.min(409, Math.max(18, lines * lineHeight + 8));
+  }
+
+  /**
+   * ส่งออก .xlsx — ตัวกรอง `search` ใช้กฎเดียวกับหน้า admin (slug / path / package_id)
+   */
+  async generateActivityPaidPackageCountsExcel(
+    activityId: number,
+    search?: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const data = await this.getActivityPaidPackageItemCounts(activityId);
+    const rows = this.filterPackageCountRowsBySearch(data.rows, search);
+
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Banpong Molly';
+    workbook.created = new Date();
+
+    const pathColWidth = 78;
+    const sheet = workbook.addWorksheet('รายงานตาม Package', {
+      properties: { defaultRowHeight: 18 },
+    });
+    sheet.columns = [
+      { header: 'package_id', key: 'package_id', width: 12 },
+      { header: 'slug', key: 'slug', width: 24 },
+      {
+        header: 'กลุ่ม / Package / คลาส',
+        key: 'path_label',
+        width: pathColWidth,
+      },
+      { header: 'จำนวนรายการ', key: 'item_count', width: 18 },
+    ];
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true };
+    headerRow.alignment = { vertical: 'middle', wrapText: true };
+    headerRow.height = 36;
+
+    sheet.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
+    sheet.getColumn(1).alignment = { vertical: 'top' };
+    sheet.getColumn(2).alignment = { vertical: 'top' };
+    sheet.getColumn(4).alignment = { vertical: 'top', horizontal: 'right' };
+
+    let totalItems = 0;
+    for (const r of rows) {
+      totalItems += r.item_count;
+      const excelRow = sheet.addRow({
+        package_id: r.package_id,
+        slug: r.slug ?? '',
+        path_label: r.path_label,
+        item_count: r.item_count,
+      });
+      excelRow.height = this.excelApproxRowHeightForWrappedText(
+        r.path_label,
+        pathColWidth,
+      );
+    }
+
+    const totalRow = sheet.addRow({
+      package_id: '',
+      slug: '',
+      path_label: 'รวม',
+      item_count: totalItems,
+    });
+    totalRow.font = { bold: true };
+    totalRow.height = 22;
+    totalRow.getCell(3).alignment = {
+      horizontal: 'right',
+      vertical: 'middle',
+      wrapText: false,
+    };
+    totalRow.getCell(4).alignment = { horizontal: 'right', vertical: 'middle' };
+    totalRow.getCell(4).numFmt = '#,##0';
+
+    const buf = await workbook.xlsx.writeBuffer();
+    const base = this.sanitizeExcelFilenameBase(data.activity.title);
+    const stamp = this.filenameTimestampSegment();
+    const filename = `${base} - package-counts ${activityId} - ${stamp}.xlsx`;
+    return { buffer: Buffer.from(buf), filename };
   }
 
   private escapeHtmlForPdf(text: string): string {
