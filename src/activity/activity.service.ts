@@ -62,6 +62,8 @@ export interface ActivityLeafClass {
   name: string;
   full_path: string;
   price: number;
+  /** slug ของโหนดใบในตาราง activity_package (เช่น A1, B2) */
+  slug: string | null;
 }
 
 @Injectable()
@@ -622,6 +624,7 @@ export class ActivityService {
             name: node.name,
             full_path: path,
             price,
+            slug: node.slug ?? null,
           },
         ];
       }
