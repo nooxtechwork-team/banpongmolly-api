@@ -671,6 +671,49 @@ export class ReportService {
     });
   }
 
+  /** บล็อกหนึ่ง Order (หัวข้อ + ตารางรายการปลา) — ใช้ทั้ง PDF แบบจัดตาม User และแบบเรียงตาม Order */
+  private appendActivityAttendanceRegistrationPdfBlock(
+    parts: string[],
+    reg: ActivityAttendanceRegistrationSlice,
+  ): void {
+    const esc = (s: string) => this.escapeHtmlForPdf(s);
+    parts.push(
+      '<div style="margin-top:8px;border:1px solid #111111;border-radius:6px;overflow:hidden;">',
+    );
+    parts.push(
+      '<div style="padding:10px 12px;background:#f9fafb;border-bottom:1px solid #111111;font-size:17px;line-height:1.45;color:#111827;">',
+    );
+    parts.push(
+      `<div><strong>Order:</strong> ${esc(reg.order_no || `#${reg.registration_id}`)} | <strong>ผู้สมัคร:</strong> ${esc(reg.applicant_name)} | <strong>เบอร์โทร:</strong> ${esc(reg.applicant_phone || '—')} | <strong>ฟาร์ม:</strong> ${esc(reg.farm_name || '—')}</div>`,
+    );
+    parts.push(
+      `<div style="margin-top:4px;color:#111827;"><strong>สมัครเมื่อ:</strong> ${esc(this.formatAttendanceRegisteredAt(reg.registered_at))} | <strong>เช็คอิน:</strong> ${esc(this.formatAttendanceCheckedIn(reg.checked_in_at))}</div>`,
+    );
+    parts.push('</div>');
+
+    parts.push(
+      '<table style="table-layout:fixed;"><colgroup><col style="width:48px;"><col style="width:96px;"><col style="width:17%;"><col style="width:21%;"><col style="width:29%;"><col style="width:16%;"></colgroup><thead><tr>',
+    );
+    parts.push(
+      '<th>ลำดับ</th><th>รหัสปลา</th><th>กลุ่มการประกวด</th><th>ประเภทการแข่งขัน</th><th>หมวดหมู่ปลา</th><th>คลาสการแข่งขัน</th>',
+    );
+    parts.push('</tr></thead><tbody>');
+    const rows = this.sortActivityAttendanceEntries(reg.entries);
+    if (!rows.length) {
+      parts.push(
+        '<tr><td colspan="6" style="text-align:center;color:#6b7280;">ไม่มีรายการ</td></tr>',
+      );
+    } else {
+      rows.forEach((row, i) => {
+        parts.push(
+          `<tr><td>${esc(String(i + 1))}</td><td style="font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;word-break:normal;">${esc(row.entry_code)}</td><td>${esc(row.group_label)}</td><td>${esc(row.class_label)}</td><td>${esc(row.type_label)}</td><td>${esc(row.breed_label)}</td></tr>`,
+        );
+      });
+    }
+    parts.push('</tbody></table>');
+    parts.push('</div>');
+  }
+
   private buildActivityAttendancePdfBodyHtml(
     users: ActivityAttendanceUserGroup[],
   ): string {
@@ -695,45 +738,84 @@ export class ReportService {
       parts.push('</div>');
 
       for (const reg of g.registrations) {
-        parts.push(
-          '<div style="margin-top:8px;border:1px solid #111111;border-radius:6px;overflow:hidden;">',
-        );
-        parts.push(
-          '<div style="padding:8px 10px;background:#ffffff;border-bottom:1px solid #111111;font-size:11px;line-height:1.5;color:#000000;">',
-        );
-        parts.push(
-          `<div><strong>Order:</strong> ${esc(reg.order_no || `#${reg.registration_id}`)} | <strong>ผู้สมัคร:</strong> ${esc(reg.applicant_name)} | <strong>เบอร์โทร:</strong> ${esc(reg.applicant_phone || '—')} | <strong>ฟาร์ม:</strong> ${esc(reg.farm_name || '—')}</div>`,
-        );
-        parts.push(
-          `<div style="margin-top:2px;color:#000000;"><strong>สมัครเมื่อ:</strong> ${esc(this.formatAttendanceRegisteredAt(reg.registered_at))} | <strong>เช็คอิน:</strong> ${esc(this.formatAttendanceCheckedIn(reg.checked_in_at))}</div>`,
-        );
-        parts.push('</div>');
-
-        parts.push(
-          '<table style="table-layout:fixed;"><colgroup><col style="width:50px;"><col style="width:60px;"><col style="width:18%;"><col style="width:22%;"><col style="width:30%;"><col style="width:17%;"></colgroup><thead><tr>',
-        );
-        parts.push(
-          '<th>ลำดับ</th><th>รหัสปลา</th><th>กลุ่มการประกวด</th><th>ประเภทการแข่งขัน</th><th>หมวดหมู่ปลา</th><th>คลาสการแข่งขัน</th>',
-        );
-        parts.push('</tr></thead><tbody>');
-        const rows = this.sortActivityAttendanceEntries(reg.entries);
-        if (!rows.length) {
-          parts.push(
-            '<tr><td colspan="6" style="text-align:center;color:#6b7280;">ไม่มีรายการ</td></tr>',
-          );
-        } else {
-          rows.forEach((row, i) => {
-            parts.push(
-              `<tr><td>${esc(String(i + 1))}</td><td style="font-family:ui-monospace,monospace;font-size:9px;white-space:nowrap;word-break:normal;">${esc(row.entry_code)}</td><td>${esc(row.group_label)}</td><td>${esc(row.class_label)}</td><td>${esc(row.type_label)}</td><td>${esc(row.breed_label)}</td></tr>`,
-            );
-          });
-        }
-        parts.push('</tbody></table>');
-        parts.push('</div>');
+        this.appendActivityAttendanceRegistrationPdfBlock(parts, reg);
       }
       parts.push('</div>');
     });
     return parts.join('\n');
+  }
+
+  /** PDF เฉพาะราย Order เรียงเวลาสมัครเก่า → ใหม่ ไม่มีบล็อก User */
+  private buildActivityAttendancePdfBodyHtmlOrdersOnly(
+    registrations: ActivityAttendanceRegistrationSlice[],
+  ): string {
+    const parts: string[] = [];
+    registrations.forEach((reg, idx) => {
+      const wrapCls = idx > 0 ? 'user-block page-break' : 'user-block';
+      parts.push(`<div class="${wrapCls}">`);
+      this.appendActivityAttendanceRegistrationPdfBlock(parts, reg);
+      parts.push('</div>');
+    });
+    return parts.join('\n');
+  }
+
+  private registrationCreatedAtSortKeyMs(
+    reg: ActivityAttendanceRegistrationSlice,
+  ): number {
+    const t = new Date(reg.registered_at).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  }
+
+  /** ราย Order ทั้งกิจกรรม เรียงสมัครจากเก่าไปใหม่ (ไม่จัดกลุ่มตาม User) */
+  async generateActivityAttendancePdfByOrder(
+    activityId: number,
+  ): Promise<{ pdf: Uint8Array; filename: string }> {
+    const detail = await this.getActivityAttendanceDetail(activityId);
+    const flat: ActivityAttendanceRegistrationSlice[] = [];
+    for (const u of detail.users) {
+      for (const reg of u.registrations) {
+        flat.push(reg);
+      }
+    }
+    if (!flat.length) {
+      throw new NotFoundException('ยังไม่มีผู้สมัครที่ชำระเงินแล้วในงานนี้');
+    }
+    flat.sort((a, b) => {
+      const da = this.registrationCreatedAtSortKeyMs(a);
+      const db = this.registrationCreatedAtSortKeyMs(b);
+      if (da !== db) return da - db;
+      return a.registration_id - b.registration_id;
+    });
+
+    const generatedAt = new Date().toLocaleString('th-TH', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const scopeLabel = 'เรียงตาม Order (สมัครก่อน → หลัง) — ไม่จัดกลุ่มผู้ใช้';
+    const bodyHtml = this.buildActivityAttendancePdfBodyHtmlOrdersOnly(flat);
+
+    let html = this.resolveActivityAttendancePdfTemplate();
+    html = html
+      .replace(
+        /{{activity_title}}/g,
+        this.escapeHtmlForPdf(detail.activity.title),
+      )
+      .replace(/{{generated_at}}/g, this.escapeHtmlForPdf(generatedAt))
+      .replace(/{{scope_label}}/g, this.escapeHtmlForPdf(scopeLabel))
+      .replace(/{{body}}/g, bodyHtml);
+
+    const pdf = await this.receiptPuppeteer.htmlToPdfBuffer(html);
+    const titleSeg = this.sanitizeActivityAttendancePdfFilenameSegment(
+      detail.activity.title,
+    );
+    const filename = this.composeActivityAttendancePdfFilename([
+      'orders',
+      titleSeg,
+    ]);
+    return { pdf, filename };
   }
 
   private resolveActivityAttendancePdfTemplate(): string {

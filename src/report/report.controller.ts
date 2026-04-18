@@ -63,6 +63,25 @@ export class ReportController {
     res.send(Buffer.from(pdf));
   }
 
+  /**
+   * Export PDF — เฉพาะราย Order เรียงเวลาสมัครจากเก่าไปใหม่ ไม่มีบล็อกจัดกลุ่มตาม User
+   */
+  @Get('activities/:activityId/attendance-by-order.pdf')
+  async activityAttendanceByOrderPdf(
+    @Param('activityId', ParseIntPipe) activityId: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { pdf, filename } =
+      await this.reportService.generateActivityAttendancePdfByOrder(activityId);
+    res.setHeader('Content-Type', 'application/pdf');
+    const asciiFallback = 'activity-attendance-orders.pdf';
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    res.send(Buffer.from(pdf));
+  }
+
   /** รายละเอียดต่อกิจกรรม — ผู้สมัครชำระเงินแล้วทั้งหมด; จัดกลุ่มตามผู้ใช้ (user_id หรือเบอร์+ชื่อ) */
   @Get('activities/:activityId')
   async activityDetail(
