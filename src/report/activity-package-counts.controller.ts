@@ -27,6 +27,20 @@ export class ActivityPackageCountsController {
     return this.reportService.getActivityPaidPackageItemCounts(activityId);
   }
 
+  /** รายการย่อยของ Package/คลาสที่เลือก — เฉพาะรายการชำระเงินแล้ว */
+  @Get('activities/:activityId/packages/:packageId')
+  async packageCountItemsByPackage(
+    @Param('activityId', ParseIntPipe) activityId: number,
+    @Param('packageId', ParseIntPipe) packageId: number,
+  ): Promise<
+    Awaited<ReturnType<ReportService['getActivityPaidPackageItemDetail']>>
+  > {
+    return this.reportService.getActivityPaidPackageItemDetail(
+      activityId,
+      packageId,
+    );
+  }
+
   /** ส่งออก Excel (.xlsx) — query `q` กรอง slug / ชื่อ path / package_id เหมือนหน้าเว็บ */
   @Get('activities/:activityId/export.xlsx')
   async exportPackageCountsXlsx(

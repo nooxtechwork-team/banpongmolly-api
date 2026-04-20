@@ -43,6 +43,8 @@ export interface CheckoutItemRow {
   order_no: string;
   /** ISO: เวลาสร้างคำสั่งซื้อ */
   order_created_at: string;
+  /** ISO: เวลา check-in */
+  checked_in_at: string | null;
   applicant_name: string;
   applicant_email: string | null;
   farm_name: string | null;
@@ -275,6 +277,7 @@ export class CheckOutService {
         'ord.id AS order_id',
         'ord.order_no AS order_no',
         'ord.created_at AS order_created_at',
+        'reg.checked_in_at AS checked_in_at',
       ])
       .orderBy('ord.created_at', 'DESC')
       .addOrderBy('reg.id', 'DESC')
@@ -321,6 +324,12 @@ export class CheckOutService {
             order_id: orderId,
             order_no: String(r.order_no ?? ''),
             order_created_at,
+            checked_in_at:
+              r.checked_in_at instanceof Date
+                ? r.checked_in_at.toISOString()
+                : r.checked_in_at != null && String(r.checked_in_at).trim() !== ''
+                  ? String(r.checked_in_at).trim()
+                  : null,
             applicant_name: String(r.applicant_name ?? ''),
             applicant_email:
               r.applicant_email != null &&

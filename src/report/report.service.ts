@@ -79,6 +79,28 @@ export interface ActivityPaidPackageCountsResponse {
   total_items: number;
 }
 
+export interface ActivityPaidPackageCountItemDetailRow {
+  registration_id: number;
+  registration_no: string;
+  order_no: string | null;
+  applicant_name: string;
+  phone: string | null;
+  farm_name: string | null;
+  entry_code: string;
+  registered_at: string;
+}
+
+export interface ActivityPaidPackageCountItemDetailResponse {
+  activity: { id: number; title: string };
+  package: {
+    package_id: number;
+    slug: string | null;
+    path_label: string;
+  };
+  items: ActivityPaidPackageCountItemDetailRow[];
+  total_items: number;
+}
+
 type EntryJsonRow = {
   index?: string;
   package_id?: number;
@@ -716,6 +738,112 @@ export class ReportService {
     return {
       activity: { id: activity.id, title: activity.title },
       rows,
+      total_items: totalItems,
+    };
+  }
+
+  async getActivityPaidPackageItemDetail(
+    activityId: number,
+    packageId: number,
+  ): Promise<ActivityPaidPackageCountItemDetailResponse> {
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId },
+    });
+    if (!activity) {
+      throw new NotFoundException('ไม่พบกิจกรรม');
+    }
+
+    const raws = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(
+        Order,
+        'o',
+        'o.refer_id = reg.id AND o.type = :otype AND o.status = :paid',
+        {
+          otype: OrderType.ACTIVITY_REGISTRATION,
+          paid: OrderStatus.PAID,
+        },
+      )
+      .where('reg.activity_id = :aid', { aid: activityId })
+      .select('reg.id', 'registration_id')
+      .addSelect('reg.registration_no', 'registration_no')
+      .addSelect('reg.applicant_name', 'applicant_name')
+      .addSelect('reg.phone', 'phone')
+      .addSelect('reg.farm_name', 'farm_name')
+      .addSelect('reg.entries_json', 'entries_json')
+      .addSelect('reg.created_at', 'registered_at')
+      .addSelect('o.order_no', 'order_no')
+      .orderBy('reg.created_at', 'ASC')
+      .getRawMany();
+
+    const pathMap = await this.buildPackageNamePathMap([packageId]);
+    const packageRows = await this.activityPackageRepository.find({
+      where: { id: packageId, deleted_at: IsNull() },
+      take: 1,
+    });
+    const pkg = packageRows[0];
+    const slug = pkg?.slug ?? null;
+    const pathLabel =
+      pathMap.get(packageId) ?? pkg?.name ?? `Package #${packageId}`;
+    const slugPathMap = await this.buildPackageSlugPathFromLayer2Map([packageId]);
+    const slugPath = slugPathMap.get(packageId) ?? null;
+
+    const items: ActivityPaidPackageCountItemDetailRow[] = [];
+    let totalItems = 0;
+    for (const r of raws || []) {
+      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      for (const e of entries) {
+        const pid = Number(e.package_id);
+        if (pid !== packageId) continue;
+        const qty = Math.max(1, Number(e.quantity) || 1);
+        for (let i = 0; i < qty; i++) {
+          totalItems += 1;
+          const idxStr =
+            e.index != null && String(e.index).trim() !== ''
+              ? String(e.index).trim()
+              : '0000';
+          items.push({
+            registration_id: Number(r.registration_id),
+            registration_no: String(r.registration_no ?? '').trim() || `AR-${r.registration_id}`,
+            order_no:
+              r.order_no != null && String(r.order_no).trim() !== ''
+                ? String(r.order_no).trim()
+                : null,
+            applicant_name: String(r.applicant_name ?? '').trim() || 'ไม่ระบุชื่อ',
+            phone:
+              r.phone != null && String(r.phone).trim() !== ''
+                ? String(r.phone).trim()
+                : null,
+            farm_name:
+              r.farm_name != null && String(r.farm_name).trim() !== ''
+                ? String(r.farm_name).trim()
+                : null,
+            entry_code: buildActivityRegistrationEntryCode(slugPath, idxStr),
+            registered_at:
+              this.toIsoOrNull(r.registered_at) ?? new Date(0).toISOString(),
+          });
+        }
+      }
+    }
+
+    items.sort((a, b) => {
+      const ta = new Date(a.registered_at).getTime();
+      const tb = new Date(b.registered_at).getTime();
+      if (ta !== tb) return ta - tb;
+      if (a.registration_id !== b.registration_id) {
+        return a.registration_id - b.registration_id;
+      }
+      return a.entry_code.localeCompare(b.entry_code);
+    });
+
+    return {
+      activity: { id: activity.id, title: activity.title },
+      package: {
+        package_id: packageId,
+        slug,
+        path_label: pathLabel,
+      },
+      items,
       total_items: totalItems,
     };
   }

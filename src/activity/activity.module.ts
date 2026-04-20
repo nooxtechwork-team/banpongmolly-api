@@ -7,6 +7,7 @@ import { ActivityTag } from '../entities/activity-tag.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
+import { SponsorRegistration } from '../entities/sponsor.entity';
 import { ActivityService } from './activity.service';
 import { ActivityRewardService } from './activity-reward.service';
 import { ActivityTagService } from './activity-tag.service';
@@ -29,6 +30,7 @@ import { LegalModule } from '../legal/legal.module';
       ActivityRegistration,
       ActivitySponsorPackage,
       SponsorPackage,
+      SponsorRegistration,
     ]),
     UploadModule,
     ActivityPackageModule,

@@ -9,6 +9,7 @@ import { Activity, ActivityStatus } from '../entities/activity.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
+import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { ActivityPackageTreeNode as AptNode } from '../activity-package/activity-package.service';
 import { OrderService } from '../order/order.service';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -53,9 +54,18 @@ export type ActivityPublicDetail = Omit<Activity, 'competition_dashboard_json'> 
   rewards?: ActivityRewardDto[];
   tags?: ActivityTagDto[];
   sponsor_packages?: SponsorPackage[];
+  sponsors?: ActivityPublicSponsor[];
   live_embeds: ActivityLiveEmbed[];
   competition_dashboard: CompetitionDashboardPayload | null;
 };
+
+export interface ActivityPublicSponsor {
+  id: number;
+  brand_display_name: string;
+  tier: SponsorTier;
+  amount: number;
+  logo_url: string | null;
+}
 
 export interface ActivityLeafClass {
   id: number;
@@ -77,6 +87,8 @@ export class ActivityService {
     private readonly activitySponsorPkgRepo: Repository<ActivitySponsorPackage>,
     @InjectRepository(SponsorPackage)
     private readonly sponsorPackageRepo: Repository<SponsorPackage>,
+    @InjectRepository(SponsorRegistration)
+    private readonly sponsorRepo: Repository<SponsorRegistration>,
     private readonly uploadService: UploadService,
     private readonly activityPackageService: ActivityPackageService,
     private readonly activityRewardService: ActivityRewardService,
@@ -568,13 +580,27 @@ export class ActivityService {
    */
   async getPublicDetailBySlug(slug: string): Promise<ActivityPublicDetail> {
     const activity = await this.findOneBySlug(slug);
-    const [price_range, rewards, tags, sponsor_packages] = await Promise.all([
+    const [price_range, rewards, tags, sponsor_packages, sponsors] = await Promise.all([
       this.activityPackageService.getLeafPriceRangeForPackage(
         activity.activity_package_id,
       ),
       this.activityRewardService.findByActivityId(activity.id),
       this.activityTagService.getTagsForActivity(activity.id),
       this.getSponsorPackagesForActivity(activity.id),
+      this.sponsorRepo
+        .createQueryBuilder('sponsor')
+        .where('sponsor.activity_id = :activityId', { activityId: activity.id })
+        .orderBy(
+          `CASE sponsor.tier
+             WHEN 'premium' THEN 1
+             WHEN 'main' THEN 2
+             WHEN 'supporter' THEN 3
+             ELSE 4
+           END`,
+          'ASC',
+        )
+        .addOrderBy('sponsor.created_at', 'ASC')
+        .getMany(),
     ]);
     const { competition_dashboard_json, ...rest } = activity;
     return {
@@ -583,6 +609,13 @@ export class ActivityService {
       rewards,
       tags,
       sponsor_packages,
+      sponsors: sponsors.map((s) => ({
+        id: s.id,
+        brand_display_name: s.brand_display_name,
+        tier: s.tier,
+        amount: Number(s.amount),
+        logo_url: s.logo_url ?? null,
+      })),
       live_embeds: parseActivityLiveEmbedsJson(activity.live_embeds_json),
       competition_dashboard: parseCompetitionDashboardJson(
         competition_dashboard_json,

@@ -9,6 +9,7 @@ import { OrderModule } from '../order/order.module';
 import { ReportService } from './report.service';
 import { ReportController } from './report.controller';
 import { ActivityPackageCountsController } from './activity-package-counts.controller';
+import { CheckInOutReportController } from './check-in-out.controller';
 
 @Module({
   imports: [
@@ -21,7 +22,11 @@ import { ActivityPackageCountsController } from './activity-package-counts.contr
     AuthModule,
     OrderModule,
   ],
-  controllers: [ReportController, ActivityPackageCountsController],
+  controllers: [
+    ReportController,
+    ActivityPackageCountsController,
+    CheckInOutReportController,
+  ],
   providers: [ReportService],
   exports: [ReportService],
 })
