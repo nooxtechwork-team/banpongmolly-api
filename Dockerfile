@@ -19,4 +19,4 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3001
 # รันด้วย node ตรงๆ ดึง Logs ออกมาหา Coolify UI ได้ 100%
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]
