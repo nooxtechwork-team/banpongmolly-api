@@ -7,7 +7,6 @@ import { Activity } from '../entities/activity.entity';
 import { Organizer } from '../entities/organizer.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { ActivityPackagePrice } from '../entities/activity-package-price.entity';
-import { ActivityReward } from '../entities/activity-reward.entity';
 import { Tag } from '../entities/tag.entity';
 import { ActivityTag } from '../entities/activity-tag.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -43,7 +42,6 @@ export const getDatabaseConfig = (
     Organizer,
     ActivityPackage,
     ActivityPackagePrice,
-    ActivityReward,
     Tag,
     ActivityTag,
     ActivityRegistration,

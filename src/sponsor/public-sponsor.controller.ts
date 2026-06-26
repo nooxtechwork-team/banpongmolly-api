@@ -27,6 +27,11 @@ export class PublicSponsorController {
     return this.sponsorService.listFeaturedForHomepage();
   }
 
+  @Get('homepage')
+  async listAllForHomepage() {
+    return this.sponsorService.listAllForHomepage();
+  }
+
   @Post('activity/:activityId/register')
   @UseGuards(JwtAuthGuard)
   async registerForActivity(

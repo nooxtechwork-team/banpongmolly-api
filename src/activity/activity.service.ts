@@ -16,10 +16,6 @@ import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
 import { UploadService } from '../upload/upload.service';
 import { ActivityPackageService } from '../activity-package/activity-package.service';
-import {
-  ActivityRewardService,
-  ActivityRewardDto,
-} from './activity-reward.service';
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import {
@@ -51,7 +47,6 @@ function slugify(text: string): string {
 
 export type ActivityPublicDetail = Omit<Activity, 'competition_dashboard_json'> & {
   price_range: { min: number | null; max: number | null };
-  rewards?: ActivityRewardDto[];
   tags?: ActivityTagDto[];
   sponsor_packages?: SponsorPackage[];
   sponsors?: ActivityPublicSponsor[];
@@ -91,7 +86,6 @@ export class ActivityService {
     private readonly sponsorRepo: Repository<SponsorRegistration>,
     private readonly uploadService: UploadService,
     private readonly activityPackageService: ActivityPackageService,
-    private readonly activityRewardService: ActivityRewardService,
     private readonly activityTagService: ActivityTagService,
     private readonly orderService: OrderService,
     private readonly userActionLogService: UserActionLogService,
@@ -114,6 +108,7 @@ export class ActivityService {
       slug: string;
       title: string;
       cover_image: string | null;
+      banner_image: string | null;
       start_date: Date;
       end_date: Date;
       location_name: string;
@@ -138,6 +133,7 @@ export class ActivityService {
       slug: a.slug,
       title: a.title,
       cover_image: a.cover_image,
+      banner_image: a.banner_image,
       start_date: a.start_date,
       end_date: a.end_date,
       location_name: a.location_name,
@@ -580,11 +576,10 @@ export class ActivityService {
    */
   async getPublicDetailBySlug(slug: string): Promise<ActivityPublicDetail> {
     const activity = await this.findOneBySlug(slug);
-    const [price_range, rewards, tags, sponsor_packages, sponsors] = await Promise.all([
+    const [price_range, tags, sponsor_packages, sponsors] = await Promise.all([
       this.activityPackageService.getLeafPriceRangeForPackage(
         activity.activity_package_id,
       ),
-      this.activityRewardService.findByActivityId(activity.id),
       this.activityTagService.getTagsForActivity(activity.id),
       this.getSponsorPackagesForActivity(activity.id),
       this.sponsorRepo
@@ -606,7 +601,6 @@ export class ActivityService {
     return {
       ...rest,
       price_range,
-      rewards,
       tags,
       sponsor_packages,
       sponsors: sponsors.map((s) => ({

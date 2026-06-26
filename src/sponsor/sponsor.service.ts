@@ -359,35 +359,105 @@ export class SponsorService {
       activityMap.set(act.id, act);
     }
 
-    return sponsors.map((s) => {
-      let socials: { type: string; label: string; url: string }[] = [];
-      if (s.social_links_json) {
-        try {
-          const parsed = JSON.parse(s.social_links_json);
-          if (Array.isArray(parsed)) {
-            socials = parsed
-              .slice(0, 2)
-              .map((v: any) => ({
-                type: String(v.type || '').trim(),
-                label: String(v.label || '').trim(),
-                url: String(v.url || '').trim(),
-              }))
-              .filter((v) => v.type && v.label && v.url);
-          }
-        } catch {
-          socials = [];
-        }
-      }
+    return sponsors.map((s) => ({
+      id: s.id,
+      brand_display_name: s.brand_display_name,
+      tier: s.tier,
+      amount: Number(s.amount),
+      logo_url: s.logo_url,
+      activity_title: activityMap.get(s.activity_id)?.title ?? null,
+      socials: this.parseSocialLinks(s.social_links_json),
+    }));
+  }
 
-      return {
-        id: s.id,
-        brand_display_name: s.brand_display_name,
-        tier: s.tier,
-        amount: Number(s.amount),
-        logo_url: s.logo_url,
-        activity_title: activityMap.get(s.activity_id)?.title ?? null,
-        socials,
-      };
+  /**
+   * สปอนเซอร์โดยรวมสำหรับหน้าแรก — รวมทุกแบรนด์ (ไม่ซ้ำชื่อ) เรียงตามระดับแพ็กเกจ
+   */
+  async listAllForHomepage(limit = 48): Promise<
+    {
+      id: number;
+      brand_display_name: string;
+      tier: SponsorTier;
+      amount: number;
+      logo_url: string | null;
+      activity_title: string | null;
+      socials: { type: string; label: string; url: string }[];
+    }[]
+  > {
+    const sponsors = await this.sponsorRepo.find({
+      order: { amount: 'DESC', created_at: 'DESC' },
     });
+
+    if (!sponsors.length) return [];
+
+    const tierRank: Record<SponsorTier, number> = {
+      premium: 3,
+      main: 2,
+      supporter: 1,
+    };
+
+    const uniqueByBrand = new Map<string, SponsorRegistration>();
+    for (const sponsor of sponsors) {
+      const key = sponsor.brand_display_name.trim().toLowerCase();
+      const existing = uniqueByBrand.get(key);
+      if (!existing) {
+        uniqueByBrand.set(key, sponsor);
+        continue;
+      }
+      const sponsorScore = tierRank[sponsor.tier] * 1_000_000 + Number(sponsor.amount);
+      const existingScore = tierRank[existing.tier] * 1_000_000 + Number(existing.amount);
+      if (sponsorScore > existingScore) {
+        uniqueByBrand.set(key, sponsor);
+      }
+    }
+
+    const activityIds = Array.from(
+      new Set(
+        Array.from(uniqueByBrand.values())
+          .map((s) => s.activity_id)
+          .filter(Boolean),
+      ),
+    );
+    const activities = activityIds.length
+      ? await this.activityRepo.find({ where: { id: In(activityIds) } })
+      : [];
+    const activityMap = new Map<number, Activity>();
+    for (const act of activities) {
+      activityMap.set(act.id, act);
+    }
+
+    const sorted = Array.from(uniqueByBrand.values()).sort((a, b) => {
+      const scoreA = tierRank[a.tier] * 1_000_000 + Number(a.amount);
+      const scoreB = tierRank[b.tier] * 1_000_000 + Number(b.amount);
+      return scoreB - scoreA;
+    });
+
+    return sorted.slice(0, limit).map((s) => ({
+      id: s.id,
+      brand_display_name: s.brand_display_name,
+      tier: s.tier,
+      amount: Number(s.amount),
+      logo_url: s.logo_url,
+      activity_title: activityMap.get(s.activity_id)?.title ?? null,
+      socials: this.parseSocialLinks(s.social_links_json),
+    }));
+  }
+
+  private parseSocialLinks(json: string | null): { type: string; label: string; url: string }[] {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .slice(0, 2)
+        .map((v: any) => ({
+          type: String(v.type || '').trim(),
+          label: String(v.label || '').trim(),
+          url: String(v.url || '').trim(),
+        }))
+        .filter((v) => v.type && v.label && v.url);
+    } catch {
+      return [];
+    }
   }
 }

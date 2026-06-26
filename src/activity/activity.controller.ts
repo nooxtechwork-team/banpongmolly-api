@@ -13,15 +13,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ActivityService } from './activity.service';
-import {
-  ActivityRewardService,
-  ActivityRewardDto,
-} from './activity-reward.service';
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { ActivityStatus } from '../entities/activity.entity';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
-import { UpsertActivityRewardsDto } from './dto/upsert-activity-rewards.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { Audit } from '../common/decorators/audit.decorator';
@@ -33,7 +28,6 @@ import { CheckOutService } from '../order/check-out.service';
 export class ActivityController {
   constructor(
     private readonly activityService: ActivityService,
-    private readonly activityRewardService: ActivityRewardService,
     private readonly activityTagService: ActivityTagService,
     private readonly checkOutService: CheckOutService,
   ) {}
@@ -56,14 +50,6 @@ export class ActivityController {
       });
     }
     return this.activityService.findAll();
-  }
-
-  @Get(':id/rewards')
-  async getRewards(
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<ActivityRewardDto[]> {
-    await this.activityService.findOne(id);
-    return this.activityRewardService.findByActivityId(id);
   }
 
   @Get(':id/tags')
@@ -101,20 +87,6 @@ export class ActivityController {
   })
   async create(@Body() dto: CreateActivityDto): Promise<Activity> {
     return this.activityService.create(dto);
-  }
-
-  @Patch(':id/rewards')
-  @Audit({
-    action: 'edit',
-    entity_type: 'activity',
-    entityIdSource: 'param:id',
-  })
-  async setRewards(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpsertActivityRewardsDto,
-  ): Promise<ActivityRewardDto[]> {
-    await this.activityService.findOne(id);
-    return this.activityRewardService.setRewards(id, dto.rewards ?? []);
   }
 
   @Patch(':id')
