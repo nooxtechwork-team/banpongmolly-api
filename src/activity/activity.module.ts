@@ -4,10 +4,12 @@ import { Activity } from '../entities/activity.entity';
 import { Tag } from '../entities/tag.entity';
 import { ActivityTag } from '../entities/activity-tag.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
+import { ActivityFavorite } from '../entities/activity-favorite.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { SponsorRegistration } from '../entities/sponsor.entity';
 import { ActivityService } from './activity.service';
+import { ActivityFavoriteService } from './activity-favorite.service';
 import { ActivityTagService } from './activity-tag.service';
 import { ActivityController } from './activity.controller';
 import { PublicActivityController } from './public-activity.controller';
@@ -25,6 +27,7 @@ import { LegalModule } from '../legal/legal.module';
       Tag,
       ActivityTag,
       ActivityRegistration,
+      ActivityFavorite,
       ActivitySponsorPackage,
       SponsorPackage,
       SponsorRegistration,
@@ -37,6 +40,7 @@ import { LegalModule } from '../legal/legal.module';
   ],
   providers: [
     ActivityService,
+    ActivityFavoriteService,
     ActivityTagService,
     AdminGuard,
   ],

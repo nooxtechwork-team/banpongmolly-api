@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { AccessLog } from '../entities/access-log.entity';
 
 export interface CreateAccessLogDto {
@@ -17,6 +17,22 @@ export interface CreateAccessLogDto {
   request_body?: Record<string, unknown> | null;
   response_headers?: Record<string, unknown> | null;
 }
+
+/** Columns needed for admin list — omit heavy JSON blobs not shown in the table */
+const LIST_SELECT = [
+  'log.id',
+  'log.method',
+  'log.path',
+  'log.status_code',
+  'log.duration_ms',
+  'log.ip',
+  'log.user_agent',
+  'log.user_id',
+  'log.user_email',
+  'log.request_query',
+  'log.request_body',
+  'log.created_at',
+] as const;
 
 @Injectable()
 export class AccessLogService {
@@ -41,6 +57,40 @@ export class AccessLogService {
       response_headers: dto.response_headers ?? null,
     });
     await this.repo.save(log);
+  }
+
+  private applyFilters(
+    qb: SelectQueryBuilder<AccessLog>,
+    params: {
+      method?: string;
+      status_code?: number;
+      user_id?: number;
+      path?: string;
+      from?: string;
+      to?: string;
+    },
+  ): SelectQueryBuilder<AccessLog> {
+    if (params.method) {
+      qb.andWhere('log.method = :method', { method: params.method });
+    }
+    if (params.status_code != null && Number.isFinite(params.status_code)) {
+      qb.andWhere('log.status_code = :status', {
+        status: params.status_code,
+      });
+    }
+    if (params.user_id != null && Number.isFinite(params.user_id)) {
+      qb.andWhere('log.user_id = :user_id', { user_id: params.user_id });
+    }
+    if (params.path) {
+      qb.andWhere('log.path LIKE :path', { path: `%${params.path}%` });
+    }
+    if (params.from) {
+      qb.andWhere('log.created_at >= :from', { from: params.from });
+    }
+    if (params.to) {
+      qb.andWhere('log.created_at <= :to', { to: params.to });
+    }
+    return qb;
   }
 
   async findList(params: {
@@ -69,37 +119,51 @@ export class AccessLogService {
         typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? rawLimit : 20,
       ),
     );
+    const offset = (page - 1) * limit;
 
-    const qb = this.repo
+    const filterParams = {
+      method: params.method,
+      status_code: params.status_code,
+      user_id: params.user_id,
+      path: params.path,
+      from: params.from,
+      to: params.to,
+    };
+
+    const baseQb = this.applyFilters(
+      this.repo.createQueryBuilder('log'),
+      filterParams,
+    );
+
+    const [idRows, total] = await Promise.all([
+      this.applyFilters(
+        this.repo.createQueryBuilder('log'),
+        filterParams,
+      )
+        .select('log.id', 'id')
+        .orderBy('log.created_at', 'DESC')
+        .addOrderBy('log.id', 'DESC')
+        .offset(offset)
+        .limit(limit)
+        .getRawMany<{ id: number }>(),
+      baseQb.clone().getCount(),
+    ]);
+
+    const ids = idRows
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isFinite(id));
+
+    if (ids.length === 0) {
+      return { items: [], total };
+    }
+
+    const items = await this.repo
       .createQueryBuilder('log')
-      .orderBy('log.created_at', 'DESC');
-
-    if (params.method) {
-      qb.andWhere('log.method = :method', { method: params.method });
-    }
-    if (params.status_code != null && Number.isFinite(params.status_code)) {
-      qb.andWhere('log.status_code = :status', {
-        status: params.status_code,
-      });
-    }
-    if (params.user_id != null && Number.isFinite(params.user_id)) {
-      qb.andWhere('log.user_id = :user_id', { user_id: params.user_id });
-    }
-    if (params.path) {
-      qb.andWhere('log.path LIKE :path', { path: `%${params.path}%` });
-    }
-    if (params.from) {
-      qb.andWhere('log.created_at >= :from', { from: params.from });
-    }
-    if (params.to) {
-      qb.andWhere('log.created_at <= :to', { to: params.to });
-    }
-
-    // getManyAndCount: total = จำนวนแถวที่ตรงตัวกรองทั้งหมด (ไม่จำกัด limit) — สอดคล้องกับรายการในหน้า
-    const [items, total] = await qb
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
+      .select([...LIST_SELECT])
+      .where('log.id IN (:...ids)', { ids })
+      .orderBy('log.created_at', 'DESC')
+      .addOrderBy('log.id', 'DESC')
+      .getMany();
 
     return { items, total };
   }

@@ -50,6 +50,7 @@ export interface ActivityAttendanceUserGroup {
   user_phone: string | null;
   user_farm_name: string | null;
   user_email: string | null;
+  avatar_url: string | null;
   applicant_name: string;
   applicant_phone: string | null;
   farm_name: string | null;
@@ -60,6 +61,36 @@ export interface ActivityAttendanceUserGroup {
 export interface ActivityAttendanceDetailResponse {
   activity: { id: number; title: string };
   users: ActivityAttendanceUserGroup[];
+}
+
+export interface ActivityAttendanceUserListItem {
+  user_id: number | null;
+  group_key: string;
+  user_name: string | null;
+  user_phone: string | null;
+  user_farm_name: string | null;
+  user_email: string | null;
+  avatar_url: string | null;
+  registration_count: number;
+  entry_count: number;
+}
+
+export interface ActivityAttendanceSummary {
+  user_count: number;
+  registration_count: number;
+  entry_count: number;
+}
+
+export interface ActivityAttendanceListResponse {
+  activity: { id: number; title: string };
+  summary: ActivityAttendanceSummary;
+  items: ActivityAttendanceUserListItem[];
+  total: number;
+}
+
+export interface ActivityAttendanceUserDetailResponse {
+  activity: { id: number; title: string };
+  user: ActivityAttendanceUserGroup | null;
 }
 
 /** สรุปจำนวนรายการสมัครต่อ Package/Plan — เฉพาะ Order ชำระเงินแล้ว */
@@ -357,7 +388,7 @@ export class ReportService {
 
   async listActivityAttendanceActivities(
     page: number = 1,
-    limit: number = 20,
+    limit: number = 10,
     options?: { search?: string },
   ): Promise<{ items: ActivityAttendanceActivitySummary[]; total: number }> {
     const safeLimit = Math.min(Math.max(1, limit), 100);
@@ -450,9 +481,134 @@ export class ReportService {
     return { items, total };
   }
 
+  private userGroupEntryCount(group: ActivityAttendanceUserGroup): number {
+    return group.registrations.reduce((sum, r) => sum + r.entries.length, 0);
+  }
+
+  private userGroupMatchesSearch(
+    group: ActivityAttendanceUserGroup,
+    query: string,
+  ): boolean {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+
+    const head = [
+      group.user_name || '',
+      group.user_phone || '',
+      group.user_farm_name || '',
+      group.user_email || '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    if (head.includes(q)) return true;
+
+    return group.registrations.some((reg) => {
+      const registrationText = [
+        reg.order_no || '',
+        reg.applicant_name,
+        reg.applicant_phone || '',
+        reg.farm_name || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (registrationText.includes(q)) return true;
+      return reg.entries.some((entry) =>
+        entry.entry_code.toLowerCase().includes(q),
+      );
+    });
+  }
+
+  private toActivityAttendanceUserListItem(
+    group: ActivityAttendanceUserGroup,
+  ): ActivityAttendanceUserListItem {
+    return {
+      user_id: group.user_id,
+      group_key: group.group_key,
+      user_name: group.user_name,
+      user_phone: group.user_phone,
+      user_farm_name: group.user_farm_name,
+      user_email: group.user_email,
+      avatar_url: group.avatar_url,
+      registration_count: group.registrations.length,
+      entry_count: this.userGroupEntryCount(group),
+    };
+  }
+
+  private computeActivityAttendanceSummary(
+    users: ActivityAttendanceUserGroup[],
+  ): ActivityAttendanceSummary {
+    return {
+      user_count: users.length,
+      registration_count: users.reduce(
+        (sum, g) => sum + g.registrations.length,
+        0,
+      ),
+      entry_count: users.reduce(
+        (sum, g) => sum + this.userGroupEntryCount(g),
+        0,
+      ),
+    };
+  }
+
   async getActivityAttendanceDetail(
     activityId: number,
   ): Promise<ActivityAttendanceDetailResponse> {
+    const { activity, users } =
+      await this.buildActivityAttendanceUserGroups(activityId);
+    return { activity, users };
+  }
+
+  async listActivityAttendanceUsers(
+    activityId: number,
+    page: number = 1,
+    limit: number = 10,
+    options?: { search?: string },
+  ): Promise<ActivityAttendanceListResponse> {
+    const { activity, users } =
+      await this.buildActivityAttendanceUserGroups(activityId);
+    const summary = this.computeActivityAttendanceSummary(users);
+    const search = options?.search?.trim() || '';
+    const filtered = search
+      ? users.filter((g) => this.userGroupMatchesSearch(g, search))
+      : users;
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const safePage = Math.max(1, page);
+    const offset = (safePage - 1) * safeLimit;
+    const items = filtered
+      .slice(offset, offset + safeLimit)
+      .map((g) => this.toActivityAttendanceUserListItem(g));
+
+    return {
+      activity,
+      summary,
+      items,
+      total: filtered.length,
+    };
+  }
+
+  async getActivityAttendanceUser(
+    activityId: number,
+    groupKey: string,
+  ): Promise<ActivityAttendanceUserDetailResponse> {
+    const key = groupKey.trim();
+    if (!key) {
+      throw new NotFoundException('ไม่พบข้อมูลผู้สมัคร');
+    }
+    const { activity, users } =
+      await this.buildActivityAttendanceUserGroups(activityId);
+    const user = users.find((g) => g.group_key === key) ?? null;
+    if (!user) {
+      throw new NotFoundException('ไม่พบข้อมูลผู้สมัคร');
+    }
+    return { activity, user };
+  }
+
+  private async buildActivityAttendanceUserGroups(
+    activityId: number,
+  ): Promise<{
+    activity: { id: number; title: string };
+    users: ActivityAttendanceUserGroup[];
+  }> {
     const activity = await this.activityRepository.findOne({
       where: { id: activityId },
     });
@@ -488,6 +644,7 @@ export class ReportService {
       .addSelect('u.phone_number', 'user_phone')
       .addSelect('u.farm_name', 'user_farm_name')
       .addSelect('u.email', 'user_email')
+      .addSelect('u.avatar_url', 'user_avatar_url')
       .orderBy('reg.created_at', 'DESC')
       .getRawMany();
 
@@ -582,6 +739,7 @@ export class ReportService {
             user_phone?: unknown;
             user_farm_name?: unknown;
             user_email?: unknown;
+            user_avatar_url?: unknown;
             registration_no?: unknown;
             order_no?: unknown;
           }
@@ -622,6 +780,11 @@ export class ReportService {
           primaryRaw?.user_email != null &&
           String(primaryRaw.user_email).trim() !== ''
             ? String(primaryRaw.user_email).trim()
+            : null,
+        avatar_url:
+          primaryRaw?.user_avatar_url != null &&
+          String(primaryRaw.user_avatar_url).trim() !== ''
+            ? String(primaryRaw.user_avatar_url).trim()
             : null,
         applicant_name: nameDisplay || 'ไม่ระบุชื่อ',
         applicant_phone:
@@ -961,6 +1124,85 @@ export class ReportService {
     const stamp = this.filenameTimestampSegment();
     const filename = `${base} - package-counts ${activityId} - ${stamp}.xlsx`;
     return { buffer: Buffer.from(buf), filename };
+  }
+
+  /**
+   * ส่งออก .xlsx รายการย่อยของ Package/คลาสที่เลือก
+   */
+  async generateActivityPaidPackageItemDetailExcel(
+    activityId: number,
+    packageId: number,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const data = await this.getActivityPaidPackageItemDetail(
+      activityId,
+      packageId,
+    );
+
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Banpong Molly';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('รายการใน Package', {
+      properties: { defaultRowHeight: 18 },
+    });
+    sheet.columns = [
+      { header: 'รหัสปลา', key: 'entry_code', width: 22 },
+      { header: 'Registration', key: 'registration_no', width: 18 },
+      { header: 'Order', key: 'order_no', width: 18 },
+      { header: 'ผู้สมัคร', key: 'applicant_name', width: 28 },
+      { header: 'เบอร์โทร', key: 'phone', width: 16 },
+      { header: 'ฟาร์ม', key: 'farm_name', width: 24 },
+      { header: 'วันที่สมัคร', key: 'registered_at', width: 22 },
+    ];
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true };
+    headerRow.alignment = { vertical: 'middle', wrapText: true };
+    headerRow.height = 28;
+
+    for (const item of data.items) {
+      sheet.addRow({
+        entry_code: item.entry_code,
+        registration_no: item.registration_no,
+        order_no: item.order_no ?? '',
+        applicant_name: item.applicant_name,
+        phone: item.phone ?? '',
+        farm_name: item.farm_name ?? '',
+        registered_at: this.formatExcelDateTimeTh(item.registered_at),
+      });
+    }
+
+    const totalRow = sheet.addRow({
+      entry_code: '',
+      registration_no: '',
+      order_no: '',
+      applicant_name: 'รวม',
+      phone: '',
+      farm_name: '',
+      registered_at: `${data.total_items} รายการ`,
+    });
+    totalRow.font = { bold: true };
+
+    const buf = await workbook.xlsx.writeBuffer();
+    const activityBase = this.sanitizeExcelFilenameBase(data.activity.title);
+    const pkgBase = this.sanitizeExcelFilenameBase(
+      data.package.slug || data.package.path_label || `package-${packageId}`,
+    );
+    const stamp = this.filenameTimestampSegment();
+    const filename = `${activityBase} - ${pkgBase} - package-items ${packageId} - ${stamp}.xlsx`;
+    return { buffer: Buffer.from(buf), filename };
+  }
+
+  private formatExcelDateTimeTh(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso ?? '');
+    return d.toLocaleString('th-TH', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   private escapeHtmlForPdf(text: string): string {

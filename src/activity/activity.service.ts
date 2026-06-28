@@ -10,6 +10,7 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
+import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityPackageTreeNode as AptNode } from '../activity-package/activity-package.service';
 import { OrderService } from '../order/order.service';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -60,6 +61,7 @@ export interface ActivityPublicSponsor {
   tier: SponsorTier;
   amount: number;
   logo_url: string | null;
+  socials: { type: string; label: string; url: string }[];
 }
 
 export interface ActivityLeafClass {
@@ -425,6 +427,7 @@ export class ActivityService {
       sort?: 'upcoming' | 'latest' | 'oldest';
       province_id?: number;
       sponsor_only?: boolean;
+      favorite_user_id?: number;
     },
   ): Promise<{ items: Activity[]; total: number }> {
     const qb = this.activityRepository
@@ -460,6 +463,15 @@ export class ActivityService {
       qb.andWhere('activity.province_id = :province_id', {
         province_id: options.province_id,
       });
+    }
+
+    if (options?.favorite_user_id != null) {
+      qb.innerJoin(
+        'activity_favorites',
+        'af',
+        'af.activity_id = activity.id AND af.user_id = :favorite_user_id',
+        { favorite_user_id: options.favorite_user_id },
+      );
     }
 
     // เฉพาะกิจกรรมที่ผูก sponsor package อย่างน้อย 1 รายการ
@@ -584,7 +596,14 @@ export class ActivityService {
       this.getSponsorPackagesForActivity(activity.id),
       this.sponsorRepo
         .createQueryBuilder('sponsor')
-        .where('sponsor.activity_id = :activityId', { activityId: activity.id })
+        .innerJoin(
+          Order,
+          'order',
+          'order.refer_id = sponsor.id AND order.type = :orderType',
+          { orderType: OrderType.SPONSOR },
+        )
+        .andWhere('order.status = :paidStatus', { paidStatus: OrderStatus.PAID })
+        .andWhere('sponsor.activity_id = :activityId', { activityId: activity.id })
         .orderBy(
           `CASE sponsor.tier
              WHEN 'premium' THEN 1
@@ -609,6 +628,7 @@ export class ActivityService {
         tier: s.tier,
         amount: Number(s.amount),
         logo_url: s.logo_url ?? null,
+        socials: this.parseSponsorSocialLinks(s.social_links_json),
       })),
       live_embeds: parseActivityLiveEmbedsJson(activity.live_embeds_json),
       competition_dashboard: parseCompetitionDashboardJson(
@@ -710,6 +730,8 @@ export class ActivityService {
       location_google_maps_url: dto.location_google_maps_url ?? null,
       location_latitude: dto.location_latitude ?? null,
       location_longitude: dto.location_longitude ?? null,
+      check_in_geofence_enabled: dto.check_in_geofence_enabled ?? false,
+      check_in_geofence_radius_m: dto.check_in_geofence_radius_m ?? 200,
       contact_info: dto.contact_info ?? null,
       province_id: dto.province_id ?? null,
       activity_package_id: dto.activity_package_id ?? null,
@@ -743,6 +765,12 @@ export class ActivityService {
     }
     if (dto.location_longitude !== undefined) {
       updates.location_longitude = dto.location_longitude ?? null;
+    }
+    if (dto.check_in_geofence_enabled !== undefined) {
+      updates.check_in_geofence_enabled = dto.check_in_geofence_enabled;
+    }
+    if (dto.check_in_geofence_radius_m !== undefined) {
+      updates.check_in_geofence_radius_m = dto.check_in_geofence_radius_m;
     }
     if (dto.contact_info !== undefined) {
       updates.contact_info = dto.contact_info ?? null;
@@ -854,5 +882,25 @@ export class ActivityService {
     });
     existing.deleted_at = new Date();
     await this.activityRepository.save(existing);
+  }
+
+  private parseSponsorSocialLinks(
+    json: string | null,
+  ): { type: string; label: string; url: string }[] {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .slice(0, 2)
+        .map((v: { type?: string; label?: string; url?: string }) => ({
+          type: String(v.type || '').trim(),
+          label: String(v.label || '').trim(),
+          url: String(v.url || '').trim(),
+        }))
+        .filter((v) => v.type && v.label && v.url);
+    } catch {
+      return [];
+    }
   }
 }

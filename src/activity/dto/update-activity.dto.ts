@@ -142,6 +142,17 @@ export class UpdateActivityDto {
   @Type(() => ActivityLiveEmbedDto)
   live_embeds?: ActivityLiveEmbedDto[];
 
+  /** จำกัดเช็คอิน QR ให้อยู่ในรัศมีจากพิกัดกิจกรรม */
+  @IsOptional()
+  @IsBoolean()
+  check_in_geofence_enabled?: boolean;
+
+  /** รัศมีเช็คอิน (เมตร) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  check_in_geofence_radius_m?: number;
+
   /** สรุปผลการแข่งขัน (object → เก็บเป็น JSON) ส่ง null เพื่อล้างค่า */
   @IsOptional()
   @Allow()

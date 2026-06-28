@@ -19,6 +19,9 @@ export class EntryPopupAdminController {
         image_url: null,
         link_url: null,
         audience: 'all',
+        show_dismiss_checkbox: false,
+        dismiss_on_close: true,
+        reshow_after_days: null,
       };
     }
     return {
@@ -27,6 +30,9 @@ export class EntryPopupAdminController {
       image_url: row.image_url,
       link_url: row.link_url,
       audience: row.audience,
+      show_dismiss_checkbox: row.show_dismiss_checkbox ?? false,
+      dismiss_on_close: row.dismiss_on_close ?? true,
+      reshow_after_days: row.reshow_after_days ?? null,
     };
   }
 

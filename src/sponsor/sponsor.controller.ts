@@ -37,10 +37,7 @@ export class SponsorAdminController {
       page: pageNum,
       limit: limitNum,
       search: search?.trim() || undefined,
-      tier:
-        tier === 'supporter' || tier === 'main' || tier === 'premium'
-          ? tier
-          : 'all',
+      tier: tier && tier !== 'all' ? tier.trim() : 'all',
       activity_id: activityId
         ? parseInt(activityId, 10) || undefined
         : undefined,
@@ -64,7 +61,7 @@ export class SponsorAdminController {
     @Body()
     body: {
       activity_id: number;
-      tier: 'supporter' | 'main' | 'premium';
+      tier: string;
       amount: number;
       contact_name: string;
       contact_phone: string;
@@ -92,7 +89,7 @@ export class SponsorAdminController {
     @Body()
     body: Partial<{
       activity_id: number;
-      tier: 'supporter' | 'main' | 'premium';
+      tier: string;
       amount: number;
       contact_name: string;
       contact_phone: string;

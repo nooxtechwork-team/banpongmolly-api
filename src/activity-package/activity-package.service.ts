@@ -239,6 +239,16 @@ export class ActivityPackageService {
     return saved;
   }
 
+  async bulkCreate(
+    dtos: CreateActivityPackageDto[],
+  ): Promise<{ created: number; items: ActivityPackage[] }> {
+    const items: ActivityPackage[] = [];
+    for (const dto of dtos) {
+      items.push(await this.create(dto));
+    }
+    return { created: items.length, items };
+  }
+
   async update(
     id: number,
     dto: UpdateActivityPackageDto,

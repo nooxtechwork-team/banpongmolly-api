@@ -41,6 +41,30 @@ export class ActivityPackageCountsController {
     );
   }
 
+  /** ส่งออก Excel (.xlsx) รายการย่อยของ Package/คลาส */
+  @Get('activities/:activityId/packages/:packageId/export.xlsx')
+  async exportPackageCountItemsXlsx(
+    @Param('activityId', ParseIntPipe) activityId: number,
+    @Param('packageId', ParseIntPipe) packageId: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } =
+      await this.reportService.generateActivityPaidPackageItemDetailExcel(
+        activityId,
+        packageId,
+      );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    const asciiFallback = 'activity-package-items.xlsx';
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    res.send(buffer);
+  }
+
   /** ส่งออก Excel (.xlsx) — query `q` กรอง slug / ชื่อ path / package_id เหมือนหน้าเว็บ */
   @Get('activities/:activityId/export.xlsx')
   async exportPackageCountsXlsx(

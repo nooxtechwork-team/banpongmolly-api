@@ -21,6 +21,7 @@ export type AuditEntityType =
   | 'package'
   | 'user'
   | 'sponsor'
+  | 'sponsor_tier'
   | 'sponsor_package'
   | 'activity'
   | 'activity_package'

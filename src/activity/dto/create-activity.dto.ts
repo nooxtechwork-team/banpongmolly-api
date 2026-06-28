@@ -137,4 +137,15 @@ export class CreateActivityDto {
   @ValidateNested({ each: true })
   @Type(() => ActivityLiveEmbedDto)
   live_embeds?: ActivityLiveEmbedDto[];
+
+  /** จำกัดเช็คอิน QR ให้อยู่ในรัศมีจากพิกัดกิจกรรม */
+  @IsOptional()
+  @IsBoolean()
+  check_in_geofence_enabled?: boolean;
+
+  /** รัศมีเช็คอิน (เมตร) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  check_in_geofence_radius_m?: number;
 }

@@ -37,15 +37,14 @@ export class CheckInOutReportController {
     @Query('limit') limit?: string,
   ): Promise<
     Awaited<ReturnType<CheckOutService['getActivityItems']>> & {
-      total: number;
       page: number;
       limit: number;
     }
   > {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
     const limitNum = limit
-      ? Math.min(200, Math.max(1, parseInt(limit, 10) || 50))
-      : 50;
+      ? Math.min(200, Math.max(1, parseInt(limit, 10) || 10))
+      : 10;
     const payload = await this.checkOutService.getActivityItems(activityId, {
       status:
         status === 'checked_out' ||
@@ -55,14 +54,11 @@ export class CheckInOutReportController {
           : 'all',
       search: search || '',
       farm_name: farmName || '',
+      page: pageNum,
+      limit: limitNum,
     });
-    const total = payload.items.length;
-    const start = (pageNum - 1) * limitNum;
-    const end = start + limitNum;
     return {
       ...payload,
-      items: payload.items.slice(start, end),
-      total,
       page: pageNum,
       limit: limitNum,
     };

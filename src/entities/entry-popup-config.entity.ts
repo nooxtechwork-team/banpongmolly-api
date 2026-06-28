@@ -28,6 +28,18 @@ export class EntryPopupConfig {
   @Column({ type: 'varchar', length: 32, default: 'all' })
   audience: string;
 
+  /** แสดงตัวเลือก "ไม่ต้องแสดงอีก" ใน popup */
+  @Column({ type: 'boolean', default: false })
+  show_dismiss_checkbox: boolean;
+
+  /** ปิด popup (X / คลิกพื้นหลัง) แล้ถือว่าไม่แสดงอีกสำหรับเวอร์ชันนี้ */
+  @Column({ type: 'boolean', default: true })
+  dismiss_on_close: boolean;
+
+  /** แสดงซ้ำหลังจากกี่วัน (null = ไม่แสดงซ้ำจนกว่าแอดมินจะอัปเดตเนื้อหา) */
+  @Column({ type: 'int', nullable: true })
+  reshow_after_days: number | null;
+
   @CreateDateColumn()
   created_at: Date;
 

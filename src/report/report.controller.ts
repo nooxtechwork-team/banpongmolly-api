@@ -31,8 +31,8 @@ export class ReportController {
   }> {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
     const limitNum = limit
-      ? Math.min(100, Math.max(1, parseInt(limit, 10) || 20))
-      : 20;
+      ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
+      : 10;
     return this.reportService.listActivityAttendanceActivities(
       pageNum,
       limitNum,
@@ -82,13 +82,39 @@ export class ReportController {
     res.send(Buffer.from(pdf));
   }
 
-  /** รายละเอียดต่อกิจกรรม — ผู้สมัครชำระเงินแล้วทั้งหมด; จัดกลุ่มตามผู้ใช้ (user_id หรือเบอร์+ชื่อ) */
+  /** รายละเอียดต่อกิจกรรม — ผู้สมัครชำระเงินแล้ว (paginated) */
   @Get('activities/:activityId')
   async activityDetail(
     @Param('activityId', ParseIntPipe) activityId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ): Promise<
-    Awaited<ReturnType<ReportService['getActivityAttendanceDetail']>>
+    Awaited<ReturnType<ReportService['listActivityAttendanceUsers']>>
   > {
-    return this.reportService.getActivityAttendanceDetail(activityId);
+    const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
+    const limitNum = limit
+      ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
+      : 10;
+    return this.reportService.listActivityAttendanceUsers(
+      activityId,
+      pageNum,
+      limitNum,
+      { search: search?.trim() || undefined },
+    );
+  }
+
+  /** รายละเอียดผู้สมัครรายคน */
+  @Get('activities/:activityId/user')
+  async activityUserDetail(
+    @Param('activityId', ParseIntPipe) activityId: number,
+    @Query('group_key') groupKey: string,
+  ): Promise<
+    Awaited<ReturnType<ReportService['getActivityAttendanceUser']>>
+  > {
+    return this.reportService.getActivityAttendanceUser(
+      activityId,
+      groupKey?.trim() || '',
+    );
   }
 }

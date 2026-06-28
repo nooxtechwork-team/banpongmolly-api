@@ -17,6 +17,7 @@ import {
   ActivityPackageWithPrice,
 } from './activity-package.service';
 import { CreateActivityPackageDto } from './dto/create-activity-package.dto';
+import { BulkCreateActivityPackagesDto } from './dto/bulk-create-activity-packages.dto';
 import { UpdateActivityPackageDto } from './dto/update-activity-package.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
@@ -51,6 +52,17 @@ export class ActivityPackageController {
     @Body() dto: CreateActivityPackageDto,
   ): Promise<ActivityPackage> {
     return this.activityPackageService.create(dto);
+  }
+
+  @Post('bulk')
+  @HttpCode(HttpStatus.CREATED)
+  @Audit({
+    action: 'create',
+    entity_type: 'activity_package',
+    entityIdSource: 'result:items[0]:id',
+  })
+  async bulkCreate(@Body() dto: BulkCreateActivityPackagesDto) {
+    return this.activityPackageService.bulkCreate(dto.packages);
   }
 
   @Patch(':id')

@@ -37,7 +37,13 @@ export class CheckOutController {
     @Query('status') status?: 'all' | 'checked_out' | 'pending' | 'requested',
     @Query('search') search?: string,
     @Query('farm_name') farmName?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
+    const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
+    const limitNum = limit
+      ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
+      : 10;
     return this.checkOutService.getActivityItems(activityId, {
       status:
         status === 'checked_out' ||
@@ -47,6 +53,8 @@ export class CheckOutController {
           : 'all',
       search: search || '',
       farm_name: farmName || '',
+      page: pageNum,
+      limit: limitNum,
     });
   }
 

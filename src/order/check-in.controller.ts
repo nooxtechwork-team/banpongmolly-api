@@ -17,6 +17,13 @@ import { Audit } from 'src/common/decorators/audit.decorator';
 export class CheckInController {
   constructor(private readonly checkInService: CheckInService) {}
 
+  @Get('activities')
+  async listActivities(): Promise<
+    Awaited<ReturnType<CheckInService['listActivitiesForAdmin']>>
+  > {
+    return this.checkInService.listActivitiesForAdmin();
+  }
+
   @Get('lookup')
   async lookup(
     @Query('code') code?: string,
@@ -49,6 +56,7 @@ export class CheckInController {
     @Query('limit') limit?: string,
     @Query('date_from') date_from?: string,
     @Query('date_to') date_to?: string,
+    @Query('activity_id') activity_id?: string,
   ): Promise<{
     items: Awaited<ReturnType<CheckInService['getHistory']>>['items'];
     total: number;
@@ -57,14 +65,25 @@ export class CheckInController {
     const limitNum = limit
       ? Math.min(100, Math.max(1, parseInt(limit, 10) || 20))
       : 20;
+    const activityId =
+      activity_id && /^\d+$/.test(activity_id)
+        ? parseInt(activity_id, 10)
+        : undefined;
     return this.checkInService.getHistory(pageNum, limitNum, {
       date_from: date_from || undefined,
       date_to: date_to || undefined,
+      activity_id: activityId,
     });
   }
 
   @Get('stats')
-  async stats(): Promise<Awaited<ReturnType<CheckInService['getStats']>>> {
-    return this.checkInService.getStats();
+  async stats(
+    @Query('activity_id') activity_id?: string,
+  ): Promise<Awaited<ReturnType<CheckInService['getStats']>>> {
+    const activityId =
+      activity_id && /^\d+$/.test(activity_id)
+        ? parseInt(activity_id, 10)
+        : undefined;
+    return this.checkInService.getStats(activityId);
   }
 }

@@ -19,6 +19,7 @@ import { NewsModule } from './news/news.module';
 import { PaymentConfigModule } from './payment-config/payment-config.module';
 import { LegalModule } from './legal/legal.module';
 import { EntryPopupModule } from './entry-popup/entry-popup.module';
+import { HeroBannerModule } from './hero-banner/hero-banner.module';
 import { ReportModule } from './report/report.module';
 import { AccessLogModule } from './access-log/access-log.module';
 import { LoginLogModule } from './login-log/login-log.module';
@@ -55,6 +56,7 @@ import { getDatabaseConfig } from './config/database.config';
     PaymentConfigModule,
     LegalModule,
     EntryPopupModule,
+    HeroBannerModule,
     ReportModule,
   ],
   controllers: [AppController],

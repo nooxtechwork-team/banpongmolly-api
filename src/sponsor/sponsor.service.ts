@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Like, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
 import { Activity } from '../entities/activity.entity';
+import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { OrderService } from '../order/order.service';
 import { UserActionLogService } from '../user-action-log/user-action-log.service';
@@ -46,7 +47,13 @@ export class SponsorService {
 
     const qb = this.sponsorRepo
       .createQueryBuilder('sponsor')
-      .leftJoin(Activity, 'act', 'act.id = sponsor.activity_id');
+      .innerJoin(
+        Order,
+        'order',
+        'order.refer_id = sponsor.id AND order.type = :orderType',
+        { orderType: OrderType.SPONSOR },
+      )
+      .andWhere('order.status = :paidStatus', { paidStatus: OrderStatus.PAID });
 
     if (options.search?.trim()) {
       const q = `%${options.search.trim()}%`;
@@ -78,9 +85,7 @@ export class SponsorService {
     );
     const activities =
       activityIds.length > 0
-        ? await this.activityRepo.findBy({
-            id: Like<any>(`${activityIds.join(',')}`) as any,
-          })
+        ? await this.activityRepo.findBy({ id: In(activityIds) })
         : [];
 
     const activityMap = new Map<number, Activity>();
@@ -327,8 +332,29 @@ export class SponsorService {
   }
 
   /**
+   * สปอนเซอร์ที่ชำระเงินแล้ว (ใช้กับหน้าแรก / รายการ public)
+   */
+  private paidSponsorsQueryBuilder(featuredOnly = false) {
+    const qb = this.sponsorRepo
+      .createQueryBuilder('sponsor')
+      .innerJoin(
+        Order,
+        'order',
+        'order.refer_id = sponsor.id AND order.type = :orderType',
+        { orderType: OrderType.SPONSOR },
+      )
+      .andWhere('order.status = :paidStatus', { paidStatus: OrderStatus.PAID });
+
+    if (featuredOnly) {
+      qb.andWhere('sponsor.is_featured_homepage = :featured', { featured: true });
+    }
+
+    return qb;
+  }
+
+  /**
    * รายการสปอนเซอร์ที่ให้แสดงบนหน้าแรก
-   * เลือกจาก sponsor_registrations ที่ is_featured_homepage = true
+   * เลือกจาก sponsor_registrations ที่ is_featured_homepage = true และชำระเงินแล้ว
    */
   async listFeaturedForHomepage(): Promise<
     {
@@ -341,10 +367,9 @@ export class SponsorService {
       socials: { type: string; label: string; url: string }[];
     }[]
   > {
-    const sponsors = await this.sponsorRepo.find({
-      where: { is_featured_homepage: true },
-      order: { created_at: 'DESC' },
-    });
+    const sponsors = await this.paidSponsorsQueryBuilder(true)
+      .orderBy('sponsor.created_at', 'DESC')
+      .getMany();
 
     if (!sponsors.length) return [];
 
@@ -371,7 +396,7 @@ export class SponsorService {
   }
 
   /**
-   * สปอนเซอร์โดยรวมสำหรับหน้าแรก — รวมทุกแบรนด์ (ไม่ซ้ำชื่อ) เรียงตามระดับแพ็กเกจ
+   * สปอนเซอร์โดยรวมสำหรับหน้าแรก — รวมทุกแบรนด์ (ไม่ซ้ำชื่อ) ที่ชำระเงินแล้ว
    */
   async listAllForHomepage(limit = 48): Promise<
     {
@@ -384,13 +409,14 @@ export class SponsorService {
       socials: { type: string; label: string; url: string }[];
     }[]
   > {
-    const sponsors = await this.sponsorRepo.find({
-      order: { amount: 'DESC', created_at: 'DESC' },
-    });
+    const sponsors = await this.paidSponsorsQueryBuilder(false)
+      .orderBy('sponsor.amount', 'DESC')
+      .addOrderBy('sponsor.created_at', 'DESC')
+      .getMany();
 
     if (!sponsors.length) return [];
 
-    const tierRank: Record<SponsorTier, number> = {
+    const tierRank: Record<string, number> = {
       premium: 3,
       main: 2,
       supporter: 1,
@@ -404,8 +430,8 @@ export class SponsorService {
         uniqueByBrand.set(key, sponsor);
         continue;
       }
-      const sponsorScore = tierRank[sponsor.tier] * 1_000_000 + Number(sponsor.amount);
-      const existingScore = tierRank[existing.tier] * 1_000_000 + Number(existing.amount);
+      const sponsorScore = (tierRank[sponsor.tier] ?? 0) * 1_000_000 + Number(sponsor.amount);
+      const existingScore = (tierRank[existing.tier] ?? 0) * 1_000_000 + Number(existing.amount);
       if (sponsorScore > existingScore) {
         uniqueByBrand.set(key, sponsor);
       }

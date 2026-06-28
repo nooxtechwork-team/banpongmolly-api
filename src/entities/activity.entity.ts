@@ -111,6 +111,14 @@ export class Activity {
   @Column({ type: 'boolean', default: false })
   is_featured_homepage: boolean;
 
+  /** จำกัดเช็คอิน QR ให้อยู่ในรัศมีจากพิกัดกิจกรรม */
+  @Column({ type: 'boolean', default: false })
+  check_in_geofence_enabled: boolean;
+
+  /** รัศมีเช็คอิน (เมตร) — ใช้เมื่อ check_in_geofence_enabled = true */
+  @Column({ type: 'int', default: 200 })
+  check_in_geofence_radius_m: number;
+
   @CreateDateColumn()
   created_at: Date;
 

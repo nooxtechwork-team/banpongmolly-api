@@ -13,6 +13,7 @@ import { ApplicantsService } from './applicants.service';
 import { ApplicantsController } from './applicants.controller';
 import { CheckInService } from './check-in.service';
 import { CheckInController } from './check-in.controller';
+import { MyCheckInController } from './my-check-in.controller';
 import { CheckInGateway } from './check-in.gateway';
 import { ReceiptPuppeteerService } from './receipt-puppeteer.service';
 import { PaymentsAdminController } from './payments-admin.controller';
@@ -51,6 +52,7 @@ import { PaymentConfigModule } from '../payment-config/payment-config.module';
     MyOrderController,
     ApplicantsController,
     CheckInController,
+    MyCheckInController,
     PaymentsAdminController,
     AdminOrderController,
     DashboardAdminController,

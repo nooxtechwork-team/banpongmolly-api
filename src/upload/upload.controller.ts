@@ -100,4 +100,17 @@ export class UploadController {
     const url = await this.uploadService.saveFile(file, 'entry-popups');
     return { url };
   }
+
+  @Post('hero-banner-image')
+  @UseInterceptors(FileInterceptor('file', multerOptions(5 * 1024 * 1024)))
+  async uploadHeroBannerImage(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ url: string }> {
+    if (!file) throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
+    if (!IMAGE_MIME_TYPES.includes(file.mimetype as any)) {
+      throw new BadRequestException('รองรับเฉพาะรูปภาพ (JPEG, PNG, GIF, WebP)');
+    }
+    const url = await this.uploadService.saveFile(file, 'hero-banners');
+    return { url };
+  }
 }

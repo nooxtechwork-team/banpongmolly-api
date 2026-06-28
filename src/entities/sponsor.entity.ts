@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type SponsorTier = 'supporter' | 'main' | 'premium';
+export type SponsorTier = string;
 
 @Entity('sponsor_registrations')
 export class SponsorRegistration {

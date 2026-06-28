@@ -241,10 +241,13 @@ export class CheckOutService {
       status?: 'all' | 'checked_out' | 'pending' | 'requested';
       search?: string;
       farm_name?: string;
+      page?: number;
+      limit?: number;
     },
   ): Promise<{
     activity: { id: number; title: string } | null;
     items: CheckoutItemRow[];
+    total: number;
     totals: {
       total_items: number;
       checked_out_items: number;
@@ -403,9 +406,16 @@ export class CheckOutService {
       items = items.filter((x) => !x.checked_out && !!x.checkout_requested_at);
     }
 
+    const filteredTotal = items.length;
+    const safePage = Math.max(1, filters?.page ?? 1);
+    const safeLimit = Math.min(Math.max(1, filters?.limit ?? 10), 200);
+    const start = (safePage - 1) * safeLimit;
+    const pagedItems = items.slice(start, start + safeLimit);
+
     return {
       activity: { id: activity.id, title: activity.title },
-      items,
+      items: pagedItems,
+      total: filteredTotal,
       totals: {
         total_items: allItems.length,
         checked_out_items: allCheckedOut,
