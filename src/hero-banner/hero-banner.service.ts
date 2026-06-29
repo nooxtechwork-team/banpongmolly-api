@@ -89,7 +89,7 @@ export class HeroBannerService {
     const row = await this.findOneById(id);
 
     if (dto.image_url !== undefined) {
-      const imageUrl = dto.image_url.trim();
+      const imageUrl = dto.image_url?.trim();
       if (!imageUrl) {
         throw new BadRequestException('กรุณาอัปโหลดรูปแบนเนอร์');
       }
@@ -99,10 +99,10 @@ export class HeroBannerService {
       row.image_url_mobile = dto.image_url_mobile?.trim() || null;
     }
     if (dto.link_url !== undefined) {
-      row.link_url = dto.link_url.trim() || null;
+      row.link_url = dto.link_url?.trim() || null;
     }
     if (dto.alt !== undefined) {
-      row.alt = dto.alt.trim() || null;
+      row.alt = dto.alt?.trim() || null;
     }
     if (dto.is_enabled !== undefined) {
       row.is_enabled = dto.is_enabled;
