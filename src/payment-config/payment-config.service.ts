@@ -49,25 +49,30 @@ export class PaymentConfigService {
       return this.repo.save(existing);
     }
     const created = this.repo.create({
-      bank_name: 'bank_name' in payload ? payload.bank_name ?? null : null,
+      bank_name: 'bank_name' in payload ? (payload.bank_name ?? null) : null,
       bank_account_type:
-        'bank_account_type' in payload ? payload.bank_account_type ?? null : null,
+        'bank_account_type' in payload
+          ? (payload.bank_account_type ?? null)
+          : null,
       bank_account_no:
-        'bank_account_no' in payload ? payload.bank_account_no ?? null : null,
+        'bank_account_no' in payload ? (payload.bank_account_no ?? null) : null,
       bank_account_name:
-        'bank_account_name' in payload ? payload.bank_account_name ?? null : null,
+        'bank_account_name' in payload
+          ? (payload.bank_account_name ?? null)
+          : null,
       payment_instructions:
         'payment_instructions' in payload
-          ? payload.payment_instructions ?? null
+          ? (payload.payment_instructions ?? null)
           : null,
       promptpay_qr_url:
-        'promptpay_qr_url' in payload ? payload.promptpay_qr_url ?? null : null,
+        'promptpay_qr_url' in payload
+          ? (payload.promptpay_qr_url ?? null)
+          : null,
       checkout_request_notify_email:
         'checkout_request_notify_email' in payload
-          ? payload.checkout_request_notify_email ?? null
+          ? (payload.checkout_request_notify_email ?? null)
           : null,
     });
     return this.repo.save(created);
   }
 }
-

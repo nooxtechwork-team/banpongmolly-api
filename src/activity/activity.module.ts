@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Activity } from '../entities/activity.entity';
 import { Tag } from '../entities/tag.entity';
@@ -34,7 +34,7 @@ import { LegalModule } from '../legal/legal.module';
     ]),
     UploadModule,
     ActivityPackageModule,
-    OrderModule,
+    forwardRef(() => OrderModule),
     UserActionLogModule,
     LegalModule,
   ],

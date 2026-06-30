@@ -39,4 +39,3 @@ export class ActivityTag {
   @DeleteDateColumn()
   deleted_at: Date | null;
 }
-

@@ -11,4 +11,3 @@ import { PaymentConfigController } from './payment-config.controller';
   exports: [PaymentConfigService],
 })
 export class PaymentConfigModule {}
-

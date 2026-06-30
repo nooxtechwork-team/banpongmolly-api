@@ -23,4 +23,3 @@ export class ActivitySponsorPackage {
   @UpdateDateColumn()
   updated_at: Date;
 }
-

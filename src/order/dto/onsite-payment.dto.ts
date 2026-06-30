@@ -1,16 +1,26 @@
 import {
   IsBoolean,
   IsEmail,
-  IsEnum,
+  IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { Transform } from 'class-transformer';
-import { CalculateEntriesDto } from './calculate-entries.dto';
-import { PaymentMethod } from '../../entities/order.entity';
+import { CalculateEntriesDto } from '../../activity/dto/calculate-entries.dto';
 
-export class CreateActivityRegistrationDto extends CalculateEntriesDto {
+export class CreateOnsiteRegistrationDto extends CalculateEntriesDto {
+  @Type(() => Number)
+  @IsInt()
+  activity_id: number;
+
+  @Type(() => Number)
+  @IsInt()
+  user_id: number;
+
   @IsString()
   @MaxLength(255)
   applicant_name: string;
@@ -42,15 +52,16 @@ export class CreateActivityRegistrationDto extends CalculateEntriesDto {
   @IsString()
   note?: string;
 
-  /** path ของสลิปที่อัปโหลดแล้ว (optional ตอนคำนวน, required ตอนบันทึกจริงให้ controller เช็คเพิ่มเอง) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cash_received_amount?: number;
+
   @IsOptional()
   @IsString()
   @MaxLength(512)
-  payment_slip?: string;
-
-  @IsOptional()
-  @IsEnum(PaymentMethod)
-  payment_method?: PaymentMethod;
+  onsite_note?: string;
 
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean({ message: 'กรุณายอมรับนโยบายและข้อกำหนดก่อนสมัคร' })
@@ -65,3 +76,22 @@ export class CreateActivityRegistrationDto extends CalculateEntriesDto {
   privacy_policy_version: string;
 }
 
+export class ConfirmOnsiteCashDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cash_received_amount?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  onsite_note?: string;
+}
+
+export class RejectOnsiteCashDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  reason?: string;
+}

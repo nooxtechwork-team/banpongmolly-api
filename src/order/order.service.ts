@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
-import { Order, OrderStatus, OrderType } from '../entities/order.entity';
+import { Order, OrderStatus, OrderType, PaymentMethod } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
@@ -138,7 +138,15 @@ export class OrderService {
     email?: string | null;
     totalAmount: number;
     userId?: number | null;
+    paymentMethod?: PaymentMethod;
+    markPaid?: boolean;
+    paidByUserId?: number | null;
+    cashReceivedAmount?: number | null;
+    onsiteNote?: string | null;
   }): Promise<Order> {
+    const paymentMethod =
+      params.paymentMethod ?? PaymentMethod.BANK_TRANSFER;
+    const markPaid = params.markPaid === true;
     const entity = this.orderRepository.create({
       order_no: generateReferenceNo('ORD'),
       type: OrderType.ACTIVITY_REGISTRATION,
@@ -148,10 +156,26 @@ export class OrderService {
       customer_phone: params.phone,
       customer_email: params.email ?? null,
       total_amount: params.totalAmount,
-      status: OrderStatus.PENDING,
+      status: markPaid ? OrderStatus.PAID : OrderStatus.PENDING,
       payment_ref: null,
+      payment_method: paymentMethod,
+      paid_at: markPaid ? new Date() : null,
+      paid_by_user_id: markPaid ? (params.paidByUserId ?? null) : null,
+      cash_received_amount:
+        markPaid && paymentMethod === PaymentMethod.CASH
+          ? (params.cashReceivedAmount ?? params.totalAmount)
+          : null,
+      onsite_note: params.onsiteNote ?? null,
     });
-    return this.orderRepository.save(entity);
+    const saved = await this.orderRepository.save(entity);
+    if (
+      markPaid &&
+      saved.type === OrderType.ACTIVITY_REGISTRATION &&
+      saved.user_id != null
+    ) {
+      this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+    }
+    return saved;
   }
 
   async createSponsorOrder(params: {
@@ -628,6 +652,7 @@ export class OrderService {
       status: OrderStatus;
       created_at: string;
       receipt_email_sent_at: string | null;
+      payment_method: PaymentMethod;
     }[];
     total: number;
   }> {
@@ -672,6 +697,7 @@ export class OrderService {
         'user.avatar_url AS avatar_url',
         'act.title AS activity_title',
         'order.receipt_email_sent_at AS receipt_email_sent_at',
+        'order.payment_method AS payment_method',
       ])
       .orderBy('order.created_at', 'DESC')
       .offset((safePage - 1) * safeLimit)
@@ -705,6 +731,8 @@ export class OrderService {
         receipt_email_sent_at: r.receipt_email_sent_at
           ? new Date(r.receipt_email_sent_at).toISOString()
           : null,
+        payment_method:
+          (r.payment_method as PaymentMethod) ?? PaymentMethod.BANK_TRANSFER,
       };
     });
 
@@ -1046,6 +1074,170 @@ export class OrderService {
 
     // ใบเสร็จทางเมลให้สคริปต์ cron กวาด (หรือ POST .../send-receipt เพื่อคิวซ้ำ)
     return saved;
+  }
+
+  async confirmOnsiteCashPayment(
+    orderId: number,
+    staffUserId: number,
+    options?: {
+      cash_received_amount?: number | null;
+      onsite_note?: string | null;
+    },
+  ): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+    if (order.type !== OrderType.ACTIVITY_REGISTRATION) {
+      throw new BadRequestException('รองรับเฉพาะคำสั่งซื้อสมัครกิจกรรม');
+    }
+    if (order.payment_method !== PaymentMethod.CASH) {
+      throw new BadRequestException('คำสั่งซื้อนี้ไม่ใช่การชำระเงินสดหน้างาน');
+    }
+    if (order.status === OrderStatus.PAID) {
+      return order;
+    }
+    if (order.status !== OrderStatus.PENDING) {
+      throw new BadRequestException('ไม่สามารถยืนยันการชำระเงินสำหรับสถานะนี้ได้');
+    }
+
+    order.status = OrderStatus.PAID;
+    order.paid_at = new Date();
+    order.paid_by_user_id = staffUserId;
+    order.cash_received_amount =
+      options?.cash_received_amount != null
+        ? options.cash_received_amount
+        : Number(order.total_amount);
+    if (options?.onsite_note !== undefined) {
+      order.onsite_note = options.onsite_note;
+    }
+
+    const saved = await this.orderRepository.save(order);
+
+    if (saved.user_id != null) {
+      this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+    }
+
+    return saved;
+  }
+
+  async rejectOnsiteCashPayment(
+    orderId: number,
+    reason?: string | null,
+  ): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('ไม่พบคำสั่งซื้อ');
+    }
+    if (order.type !== OrderType.ACTIVITY_REGISTRATION) {
+      throw new BadRequestException('รองรับเฉพาะคำสั่งซื้อสมัครกิจกรรม');
+    }
+    if (order.payment_method !== PaymentMethod.CASH) {
+      throw new BadRequestException('คำสั่งซื้อนี้ไม่ใช่การชำระเงินสดหน้างาน');
+    }
+    if (order.status === OrderStatus.CANCELLED) {
+      return order;
+    }
+    if (order.status !== OrderStatus.PENDING) {
+      throw new BadRequestException('ไม่สามารถปฏิเสธรายการในสถานะนี้ได้');
+    }
+
+    return this.updateStatusAdmin(
+      orderId,
+      OrderStatus.CANCELLED,
+      reason?.trim() || null,
+    );
+  }
+
+  async findOnsiteCashOrders(
+    activityId: number,
+    options?: { search?: string; status?: OrderStatus | 'pending_cash' },
+  ): Promise<
+    {
+      order_id: number;
+      order_no: string;
+      status: OrderStatus;
+      payment_method: PaymentMethod;
+      total_amount: number;
+      cash_received_amount: number | null;
+      applicant_name: string;
+      phone: string;
+      registration_no: string;
+      avatar_url: string | null;
+      created_at: string;
+      paid_at: string | null;
+    }[]
+  > {
+    const qb = this.orderRepository
+      .createQueryBuilder('order')
+      .innerJoin(ActivityRegistration, 'reg', 'reg.id = order.refer_id')
+      .leftJoin(User, 'user', 'user.id = order.user_id')
+      .where('order.type = :type', {
+        type: OrderType.ACTIVITY_REGISTRATION,
+      })
+      .andWhere('order.payment_method = :cash', {
+        cash: PaymentMethod.CASH,
+      })
+      .andWhere('reg.activity_id = :activityId', { activityId });
+
+    if (options?.status === OrderStatus.PENDING) {
+      qb.andWhere('order.status = :pending', { pending: OrderStatus.PENDING });
+    } else if (options?.status === OrderStatus.PAID) {
+      qb.andWhere('order.status = :paid', { paid: OrderStatus.PAID });
+    } else if (options?.status === 'pending_cash') {
+      qb.andWhere('order.status = :pending', { pending: OrderStatus.PENDING });
+    }
+
+    if (options?.search?.trim()) {
+      const q = `%${options.search.trim()}%`;
+      qb.andWhere(
+        '(order.order_no LIKE :q OR reg.applicant_name LIKE :q OR reg.phone LIKE :q OR reg.registration_no LIKE :q)',
+        { q },
+      );
+    }
+
+    const raws = await qb
+      .select([
+        'order.id AS order_id',
+        'order.order_no AS order_no',
+        'order.status AS status',
+        'order.payment_method AS payment_method',
+        'order.total_amount AS total_amount',
+        'order.cash_received_amount AS cash_received_amount',
+        'order.created_at AS created_at',
+        'order.paid_at AS paid_at',
+        'reg.applicant_name AS applicant_name',
+        'reg.phone AS phone',
+        'reg.registration_no AS registration_no',
+        'user.avatar_url AS avatar_url',
+      ])
+      .orderBy('order.created_at', 'DESC')
+      .limit(50)
+      .getRawMany();
+
+    return (raws || []).map((r: Record<string, unknown>) => ({
+      order_id: Number(r.order_id),
+      order_no: String(r.order_no),
+      status: r.status as OrderStatus,
+      payment_method: r.payment_method as PaymentMethod,
+      total_amount: Number(r.total_amount) || 0,
+      cash_received_amount:
+        r.cash_received_amount != null
+          ? Number(r.cash_received_amount)
+          : null,
+      applicant_name: String(r.applicant_name),
+      phone: String(r.phone),
+      registration_no: String(r.registration_no),
+      avatar_url: r.avatar_url ? String(r.avatar_url) : null,
+      created_at: new Date(r.created_at as string | Date).toISOString(),
+      paid_at: r.paid_at
+        ? new Date(r.paid_at as string | Date).toISOString()
+        : null,
+    }));
   }
 
   private escapeHtmlForReceipt(text: string): string {

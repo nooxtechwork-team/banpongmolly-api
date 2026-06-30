@@ -153,6 +153,22 @@ export class UpdateActivityDto {
   @IsNumber()
   check_in_geofence_radius_m?: number;
 
+  @IsOptional()
+  @IsBoolean()
+  allow_onsite_cash?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  onsite_cash_open_at?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  onsite_cash_close_at?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_onsite_registration_after_deadline?: boolean;
+
   /** สรุปผลการแข่งขัน (object → เก็บเป็น JSON) ส่ง null เพื่อล้างค่า */
   @IsOptional()
   @Allow()

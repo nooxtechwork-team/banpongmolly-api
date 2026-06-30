@@ -119,6 +119,22 @@ export class Activity {
   @Column({ type: 'int', default: 200 })
   check_in_geofence_radius_m: number;
 
+  /** เปิดรับชำระเงินสดหน้างาน */
+  @Column({ type: 'boolean', default: false })
+  allow_onsite_cash: boolean;
+
+  /** เริ่มรับเงินสดหน้างาน (null = ใช้ start_date 00:00) */
+  @Column({ type: 'datetime', nullable: true })
+  onsite_cash_open_at: Date | null;
+
+  /** ปิดรับเงินสดหน้างาน (null = ใช้ end_date 23:59) */
+  @Column({ type: 'datetime', nullable: true })
+  onsite_cash_close_at: Date | null;
+
+  /** อนุญาตสมัคร/ชำระเงินสดหลัง registration_deadline */
+  @Column({ type: 'boolean', default: true })
+  allow_onsite_registration_after_deadline: boolean;
+
   @CreateDateColumn()
   created_at: Date;
 

@@ -30,6 +30,7 @@ export class UserController {
     @Query('search') search?: string,
     @Query('email') email?: string,
     @Query('phone') phone?: string,
+    @Query('line_id') line_id?: string,
     @Query('province_id') province_id?: string,
   ): Promise<{ items: User[]; total: number }> {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : 1;
@@ -41,6 +42,7 @@ export class UserController {
       search: search?.trim() || undefined,
       email: email?.trim() || undefined,
       phone: phone?.trim() || undefined,
+      line_id: line_id?.trim() || undefined,
       province_id: Number.isFinite(provinceId) ? provinceId : undefined,
     });
   }

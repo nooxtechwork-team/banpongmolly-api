@@ -10,7 +10,12 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
-import { Order, OrderStatus, OrderType } from '../entities/order.entity';
+import {
+  Order,
+  OrderStatus,
+  OrderType,
+  PaymentMethod,
+} from '../entities/order.entity';
 import { ActivityPackageTreeNode as AptNode } from '../activity-package/activity-package.service';
 import { OrderService } from '../order/order.service';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -33,6 +38,10 @@ import {
   type CompetitionDashboardPayload,
 } from '../common/utils/competition-dashboard.util';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
+import {
+  getOnsiteCashStatus,
+  type OnsiteCashStatus,
+} from '../common/utils/onsite-cash.util';
 import { UserActionLogService } from '../user-action-log/user-action-log.service';
 import { LegalPolicyService } from '../legal/legal-policy.service';
 
@@ -46,13 +55,17 @@ function slugify(text: string): string {
     .replace(/[^\p{L}\p{N}-]/gu, '');
 }
 
-export type ActivityPublicDetail = Omit<Activity, 'competition_dashboard_json'> & {
+export type ActivityPublicDetail = Omit<
+  Activity,
+  'competition_dashboard_json'
+> & {
   price_range: { min: number | null; max: number | null };
   tags?: ActivityTagDto[];
   sponsor_packages?: SponsorPackage[];
   sponsors?: ActivityPublicSponsor[];
   live_embeds: ActivityLiveEmbed[];
   competition_dashboard: CompetitionDashboardPayload | null;
+  onsite_cash: OnsiteCashStatus;
 };
 
 export interface ActivityPublicSponsor {
@@ -207,6 +220,49 @@ export class ActivityService {
     return max;
   }
 
+  private assertRegistrationAllowed(
+    activity: Activity,
+    now: Date,
+    opts: { paymentMethod: PaymentMethod; fromStaff: boolean },
+  ): void {
+    if (activity.status !== ActivityStatus.OPEN) {
+      throw new BadRequestException('กิจกรรมนี้ไม่ได้เปิดรับสมัครแล้ว');
+    }
+
+    const pastOpen =
+      !activity.registration_open_at || now >= activity.registration_open_at;
+    const pastDeadline =
+      !!activity.registration_deadline && now > activity.registration_deadline;
+    const onsite = getOnsiteCashStatus(activity, now);
+
+    if (opts.paymentMethod === PaymentMethod.CASH) {
+      if (!opts.fromStaff && !onsite.available) {
+        throw new BadRequestException('ยังไม่เปิดรับชำระเงินสดหน้างาน');
+      }
+      if (opts.fromStaff && !onsite.available) {
+        throw new BadRequestException('ยังไม่อยู่ในช่วงรับชำระเงินสดหน้างาน');
+      }
+      if (
+        pastDeadline &&
+        !activity.allow_onsite_registration_after_deadline &&
+        !opts.fromStaff
+      ) {
+        throw new BadRequestException('กิจกรรมนี้ปิดรับสมัครแล้ว');
+      }
+      if (!pastOpen && !opts.fromStaff) {
+        throw new BadRequestException('กิจกรรมนี้ยังไม่ถึงเวลาเปิดรับสมัคร');
+      }
+      return;
+    }
+
+    if (!pastOpen) {
+      throw new BadRequestException('กิจกรรมนี้ยังไม่ถึงเวลาเปิดรับสมัคร');
+    }
+    if (pastDeadline) {
+      throw new BadRequestException('กิจกรรมนี้ปิดรับสมัครแล้ว');
+    }
+  }
+
   async createRegistrationForSlug(
     slug: string,
     payload: {
@@ -219,6 +275,7 @@ export class ActivityService {
       note?: string;
       entries: { package_id: number; quantity: number }[];
       payment_slip?: string;
+      payment_method?: PaymentMethod;
       accept_policies: boolean;
       terms_policy_version: string;
       privacy_policy_version: string;
@@ -232,25 +289,17 @@ export class ActivityService {
       order_no: string;
       total_amount: number;
       status: string;
+      payment_method: PaymentMethod;
     };
   }> {
     const activity = await this.findOneBySlug(slug);
     const now = new Date();
+    const paymentMethod = payload.payment_method ?? PaymentMethod.BANK_TRANSFER;
 
-    if (activity.status !== ActivityStatus.OPEN) {
-      throw new BadRequestException('กิจกรรมนี้ไม่ได้เปิดรับสมัครแล้ว');
-    }
-
-    if (activity.registration_open_at && now < activity.registration_open_at) {
-      throw new BadRequestException('กิจกรรมนี้ยังไม่ถึงเวลาเปิดรับสมัคร');
-    }
-
-    if (
-      activity.registration_deadline &&
-      now > activity.registration_deadline
-    ) {
-      throw new BadRequestException('กิจกรรมนี้ปิดรับสมัครแล้ว');
-    }
+    this.assertRegistrationAllowed(activity, now, {
+      paymentMethod,
+      fromStaff: false,
+    });
 
     if (userId == null) {
       throw new BadRequestException('ต้องเข้าสู่ระบบก่อนสมัครกิจกรรม');
@@ -258,6 +307,13 @@ export class ActivityService {
 
     if (!payload.accept_policies) {
       throw new BadRequestException('กรุณายอมรับนโยบายและข้อกำหนดก่อนสมัคร');
+    }
+
+    if (
+      paymentMethod === PaymentMethod.BANK_TRANSFER &&
+      !payload.payment_slip?.trim()
+    ) {
+      throw new BadRequestException('กรุณาแนบสลิปการโอนเงิน');
     }
 
     await this.legalPolicyService.assertVersionsMatchActive(
@@ -348,6 +404,8 @@ export class ActivityService {
       email: saved.email,
       totalAmount: total_amount,
       userId: userId ?? null,
+      paymentMethod,
+      markPaid: false,
     });
 
     await this.userActionLogService.create({
@@ -374,8 +432,188 @@ export class ActivityService {
         order_no: order.order_no,
         total_amount: Number(order.total_amount),
         status: order.status,
+        payment_method: order.payment_method,
       },
     };
+  }
+
+  async createOnsiteRegistrationForStaff(
+    activityId: number,
+    payload: {
+      applicant_name: string;
+      farm_name?: string;
+      address?: string;
+      phone: string;
+      email?: string;
+      line?: string;
+      note?: string;
+      entries: { package_id: number; quantity: number }[];
+      cash_received_amount?: number;
+      onsite_note?: string;
+      accept_policies: boolean;
+      terms_policy_version: string;
+      privacy_policy_version: string;
+    },
+    userId: number,
+    staffUserId: number,
+    meta?: { ip?: string | null; userAgent?: string | null },
+  ): Promise<{
+    registration: ActivityRegistration;
+    order: {
+      id: number;
+      order_no: string;
+      total_amount: number;
+      status: string;
+      payment_method: PaymentMethod;
+      registration_no: string;
+    };
+  }> {
+    const activity = await this.findOne(activityId);
+    const now = new Date();
+
+    this.assertRegistrationAllowed(activity, now, {
+      paymentMethod: PaymentMethod.CASH,
+      fromStaff: true,
+    });
+
+    if (!payload.accept_policies) {
+      throw new BadRequestException('กรุณายอมรับนโยบายและข้อกำหนดก่อนสมัคร');
+    }
+
+    await this.legalPolicyService.assertVersionsMatchActive(
+      payload.terms_policy_version,
+      payload.privacy_policy_version,
+    );
+
+    const { total_amount, items } = await this.calculateEntriesTotalForActivity(
+      activity,
+      payload.entries,
+    );
+
+    const lineCount = items.reduce((sum, i) => sum + i.quantity, 0);
+    const startIndex =
+      (await this.getMaxEntryIndexForActivity(activity.id)) + 1;
+    const formattedIndices = allocateFormattedActivityEntryIndices(
+      startIndex,
+      lineCount,
+    );
+
+    const leafIds = [...new Set(items.map((i) => i.package_id))];
+    const slugPaths =
+      await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(
+        leafIds,
+      );
+
+    let idxPos = 0;
+    const storedLines: {
+      index: string;
+      entry_code: string;
+      package_id: number;
+      quantity: number;
+      unit_price: number;
+      line_total: number;
+    }[] = [];
+    for (const i of items) {
+      for (let k = 0; k < i.quantity; k++) {
+        const idxStr = formattedIndices[idxPos++]!;
+        const slugPath = slugPaths.get(i.package_id);
+        const entry_code = buildActivityRegistrationEntryCode(
+          slugPath ?? null,
+          idxStr,
+        );
+        storedLines.push({
+          index: idxStr,
+          entry_code,
+          package_id: i.package_id,
+          quantity: 1,
+          unit_price: i.unit_price,
+          line_total: i.unit_price,
+        });
+      }
+    }
+
+    const entity = this.registrationRepository.create({
+      registration_no: generateReferenceNo('AR'),
+      activity_id: activity.id,
+      user_id: userId,
+      applicant_name: payload.applicant_name,
+      farm_name: payload.farm_name ?? null,
+      address: payload.address ?? null,
+      phone: payload.phone,
+      email: payload.email ?? null,
+      line: payload.line ?? null,
+      note: payload.note ?? null,
+      entries_json: JSON.stringify(storedLines),
+      total_amount,
+      payment_slip: null,
+    });
+
+    const saved = await this.registrationRepository.save(entity);
+
+    await this.legalPolicyService.recordAcceptances({
+      userId,
+      termsVersion: payload.terms_policy_version,
+      privacyVersion: payload.privacy_policy_version,
+      source: 'activity_registration',
+      ip: meta?.ip ?? null,
+      userAgent: meta?.userAgent ?? null,
+      relatedRegistrationId: saved.id,
+    });
+
+    const received =
+      payload.cash_received_amount != null
+        ? payload.cash_received_amount
+        : total_amount;
+
+    const order = await this.orderService.createActivityRegistrationOrder({
+      registrationId: saved.id,
+      applicantName: saved.applicant_name,
+      phone: saved.phone,
+      email: saved.email,
+      totalAmount: total_amount,
+      userId,
+      paymentMethod: PaymentMethod.CASH,
+      markPaid: true,
+      paidByUserId: staffUserId,
+      cashReceivedAmount: received,
+      onsiteNote: payload.onsite_note ?? null,
+    });
+
+    await this.userActionLogService.create({
+      action: 'activity_apply',
+      entity_type: 'activity_registration',
+      user_id: userId,
+      entity_id: saved.id,
+      email: saved.email ?? null,
+      phone: saved.phone ?? null,
+      metadata: {
+        activity_id: activity.id,
+        registration_no: saved.registration_no,
+        order_id: order.id,
+        order_no: order.order_no,
+        payment_method: PaymentMethod.CASH,
+        staff_user_id: staffUserId,
+      },
+    });
+
+    return {
+      registration: saved,
+      order: {
+        id: order.id,
+        order_no: order.order_no,
+        total_amount: Number(order.total_amount),
+        status: order.status,
+        payment_method: order.payment_method,
+        registration_no: saved.registration_no,
+      },
+    };
+  }
+
+  private async calculateEntriesTotalForActivity(
+    activity: Activity,
+    entries: { package_id: number; quantity: number }[],
+  ) {
+    return this.calculateEntriesTotalForSlug(activity.slug, entries);
   }
 
   async findPaginated(
@@ -602,8 +840,12 @@ export class ActivityService {
           'order.refer_id = sponsor.id AND order.type = :orderType',
           { orderType: OrderType.SPONSOR },
         )
-        .andWhere('order.status = :paidStatus', { paidStatus: OrderStatus.PAID })
-        .andWhere('sponsor.activity_id = :activityId', { activityId: activity.id })
+        .andWhere('order.status = :paidStatus', {
+          paidStatus: OrderStatus.PAID,
+        })
+        .andWhere('sponsor.activity_id = :activityId', {
+          activityId: activity.id,
+        })
         .orderBy(
           `CASE sponsor.tier
              WHEN 'premium' THEN 1
@@ -634,6 +876,7 @@ export class ActivityService {
       competition_dashboard: parseCompetitionDashboardJson(
         competition_dashboard_json,
       ),
+      onsite_cash: getOnsiteCashStatus(activity),
     };
   }
 
@@ -771,6 +1014,23 @@ export class ActivityService {
     }
     if (dto.check_in_geofence_radius_m !== undefined) {
       updates.check_in_geofence_radius_m = dto.check_in_geofence_radius_m;
+    }
+    if (dto.allow_onsite_cash !== undefined) {
+      updates.allow_onsite_cash = dto.allow_onsite_cash;
+    }
+    if (dto.onsite_cash_open_at !== undefined) {
+      updates.onsite_cash_open_at = dto.onsite_cash_open_at
+        ? new Date(dto.onsite_cash_open_at)
+        : null;
+    }
+    if (dto.onsite_cash_close_at !== undefined) {
+      updates.onsite_cash_close_at = dto.onsite_cash_close_at
+        ? new Date(dto.onsite_cash_close_at)
+        : null;
+    }
+    if (dto.allow_onsite_registration_after_deadline !== undefined) {
+      updates.allow_onsite_registration_after_deadline =
+        dto.allow_onsite_registration_after_deadline;
     }
     if (dto.contact_info !== undefined) {
       updates.contact_info = dto.contact_info ?? null;

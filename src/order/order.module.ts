@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order } from '../entities/order.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -24,6 +24,8 @@ import { AdminOrderController } from './admin-order.controller';
 import { CheckOutService } from './check-out.service';
 import { CheckOutController } from './check-out.controller';
 import { PaymentConfigModule } from '../payment-config/payment-config.module';
+import { OnsiteAdminController } from './onsite-admin.controller';
+import { ActivityModule } from '../activity/activity.module';
 
 @Module({
   imports: [
@@ -38,6 +40,7 @@ import { PaymentConfigModule } from '../payment-config/payment-config.module';
     AuditLogModule,
     AuthModule,
     PaymentConfigModule,
+    forwardRef(() => ActivityModule),
   ],
   providers: [
     OrderService,
@@ -57,6 +60,7 @@ import { PaymentConfigModule } from '../payment-config/payment-config.module';
     AdminOrderController,
     DashboardAdminController,
     CheckOutController,
+    OnsiteAdminController,
   ],
   exports: [OrderService, CheckOutService, ReceiptPuppeteerService],
 })

@@ -17,6 +17,7 @@ export class UserService {
       search?: string;
       email?: string;
       phone?: string;
+      line_id?: string;
       province_id?: number;
     },
   ): Promise<{ items: User[]; total: number }> {
@@ -27,9 +28,10 @@ export class UserService {
 
     if (filters?.search?.trim()) {
       const term = `%${filters.search.trim()}%`;
-      qb.andWhere('(user.fullname LIKE :term OR user.email LIKE :term)', {
-        term,
-      });
+      qb.andWhere(
+        '(user.fullname LIKE :term OR user.email LIKE :term OR user.phone_number LIKE :term OR user.line_id LIKE :term)',
+        { term },
+      );
     }
     if (filters?.email?.trim()) {
       qb.andWhere('user.email LIKE :email', {
@@ -39,6 +41,11 @@ export class UserService {
     if (filters?.phone?.trim()) {
       qb.andWhere('user.phone_number LIKE :phone', {
         phone: `%${filters.phone.trim()}%`,
+      });
+    }
+    if (filters?.line_id?.trim()) {
+      qb.andWhere('user.line_id LIKE :line_id', {
+        line_id: `%${filters.line_id.trim()}%`,
       });
     }
     if (filters?.province_id != null) {

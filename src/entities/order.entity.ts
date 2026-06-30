@@ -17,6 +17,11 @@ export enum OrderStatus {
   CANCELLED = 'cancelled',
 }
 
+export enum PaymentMethod {
+  BANK_TRANSFER = 'bank_transfer',
+  CASH = 'cash',
+}
+
 @Entity('orders')
 export class Order {
   @PrimaryGeneratedColumn()
@@ -63,6 +68,25 @@ export class Order {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   payment_ref: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: PaymentMethod,
+    default: PaymentMethod.BANK_TRANSFER,
+  })
+  payment_method: PaymentMethod;
+
+  @Column({ type: 'datetime', nullable: true })
+  paid_at: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  paid_by_user_id: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  cash_received_amount: number | null;
+
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  onsite_note: string | null;
 
   @CreateDateColumn()
   created_at: Date;
