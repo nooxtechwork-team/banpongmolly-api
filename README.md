@@ -135,7 +135,7 @@ pnpm run script:send-pending-receipt-emails
 
 ## ส่งอีเมลแจ้งคำขอ checkout (คืนปลา) แบบกวาด (cron)
 
-เมื่อผู้สมัครกดขอแจ้งเตือนคืนปลา ระบบจะบันทึก `checkout_requested_at` ใน `activity_registrations.entries_json` — สคริปต์ cron จะส่งอีเมลไปยังที่ตั้งในแอดมิน และตั้ง `checkout_request_email_sent_at` ใน entry เดียวกันเมื่อส่ง SMTP สำเร็จ
+เมื่อผู้สมัครกดขอแจ้งเตือนคืนปลา ระบบจะบันทึก `checkout_requested_at` ใน `activity_registration_entries` — สคริปต์ cron จะส่งอีเมลไปยังที่ตั้งในแอดมิน และตั้ง `checkout_request_email_sent_at` ใน entry เดียวกันเมื่อส่ง SMTP สำเร็จ
 
 1. เพิ่มคอลัมน์ในฐานข้อมูล (ถ้าไม่ใช้ TypeORM sync):
 

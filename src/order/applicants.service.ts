@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
+import { ActivityRegistrationEntryService } from '../activity-registration/activity-registration-entry.service';
 
 export interface ApplicantListItem {
   id: number;
@@ -28,6 +29,7 @@ export class ApplicantsService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(Activity)
     private readonly activityRepository: Repository<Activity>,
+    private readonly entryService: ActivityRegistrationEntryService,
   ) {}
 
   async findPaginated(
@@ -53,7 +55,6 @@ export class ApplicantsService {
         'reg.registration_no',
         'reg.applicant_name',
         'reg.activity_id',
-        'reg.entries_json',
         'reg.total_amount',
         'reg.created_at',
       ])
@@ -111,19 +112,19 @@ export class ApplicantsService {
 
     const totalCount = await countQb.getCount();
 
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (raws || []).map((r: { reg_id: number }) => Number(r.reg_id)),
+    );
+
     const items: ApplicantListItem[] = (raws || []).map((r: any) => {
       let entries_summary = '—';
-      try {
-        const entries = JSON.parse(r.reg_entries_json || '[]');
-        if (Array.isArray(entries) && entries.length > 0) {
-          const totalQty = entries.reduce(
-            (s: number, e: any) => s + (Number(e.quantity) || 0),
-            0,
-          );
-          entries_summary = `${totalQty} รายการ`;
-        }
-      } catch {
-        // keep default
+      const lines = linesMap.get(Number(r.reg_id)) ?? [];
+      if (lines.length > 0) {
+        const totalQty = lines.reduce(
+          (s, e) => s + (Number(e.quantity) || 0),
+          0,
+        );
+        entries_summary = `${totalQty} รายการ`;
       }
       return {
         id: r.reg_id,

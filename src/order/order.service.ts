@@ -21,6 +21,11 @@ import { CheckInGateway } from './check-in.gateway';
 import { ReceiptPuppeteerService } from './receipt-puppeteer.service';
 import { PaymentConfigService } from '../payment-config/payment-config.service';
 import type { PaymentConfig } from '../entities/payment-config.entity';
+import {
+  ActivityRegistrationService,
+  type ClassChangeDisplayItem,
+} from '../activity-registration/activity-registration.service';
+import { ActivityRegistrationEntryService } from '../activity-registration/activity-registration-entry.service';
 
 /** เพดานสูงสุดต่อ «หนึ่งครั้งที่รันสคริปต์» (RECEIPT_EMAIL_BATCH_LIMIT ไม่เกินค่านี้) */
 const RECEIPT_EMAIL_BATCH_HARD_MAX = 5000;
@@ -48,6 +53,8 @@ export class OrderService {
     private readonly checkInGateway: CheckInGateway,
     private readonly receiptPuppeteer: ReceiptPuppeteerService,
     private readonly paymentConfigService: PaymentConfigService,
+    private readonly activityRegistrationService: ActivityRegistrationService,
+    private readonly entryService: ActivityRegistrationEntryService,
   ) {}
 
   private async loadPackageSlugPathFromLayer2ByLeafIds(
@@ -395,6 +402,7 @@ export class OrderService {
       checkout_request_email_sent_at: string | null;
       checkout_remark: string | null;
     }[];
+    class_changes: ClassChangeDisplayItem[];
   }> {
     const isAdmin = user.role === UserRole.ADMIN;
     const entryCodePolicy = options?.entryCodePolicy ?? 'checked_in';
@@ -444,6 +452,7 @@ export class OrderService {
       checkout_request_email_sent_at: string | null;
       checkout_remark: string | null;
     }[] = [];
+    let classChanges: ClassChangeDisplayItem[] = [];
 
     if (order.type === OrderType.ACTIVITY_REGISTRATION) {
       registration = await this.registrationRepository.findOne({
@@ -451,93 +460,82 @@ export class OrderService {
       });
 
       if (registration) {
-        try {
-          const parsed = JSON.parse(registration.entries_json);
-          if (Array.isArray(parsed)) {
-            const packageIds = parsed
-              .map((e: any) => Number(e.package_id))
-              .filter((id: number) => !Number.isNaN(id));
+        const entryLines =
+          await this.entryService.resolveLinesForRegistration(registration);
+        const packageIds = entryLines
+          .map((e) => Number(e.package_id))
+          .filter((id) => !Number.isNaN(id));
 
-            const packages = packageIds.length
-              ? await this.activityPackageRepository.find({
-                  where: { id: In(packageIds) },
-                })
-              : [];
+        const packages = packageIds.length
+          ? await this.activityPackageRepository.find({
+              where: { id: In(packageIds) },
+            })
+          : [];
 
-            const packageNameById = new Map<number, string>(
-              (packages || []).map((p) => [p.id, p.name]),
-            );
-            const packagePathById =
-              await this.loadPackageNamePathByLeafIds(packageIds);
+        const packageNameById = new Map<number, string>(
+          (packages || []).map((p) => [p.id, p.name]),
+        );
+        const packagePathById =
+          await this.loadPackageNamePathByLeafIds(packageIds);
 
-            const slugPaths =
-              await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
+        const slugPaths =
+          await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
 
-            const isCheckedIn =
-              registration.checked_in_at != null &&
-              String(registration.checked_in_at).trim() !== '';
+        const isCheckedIn =
+          registration.checked_in_at != null &&
+          String(registration.checked_in_at).trim() !== '';
 
-            entries = parsed.map((e: any) => {
-              const packageId = Number(e.package_id);
-              const packageName =
-                packagePathById.get(packageId) ??
-                packageNameById.get(packageId) ??
-                `ค่าสมัครแพ็กเกจ #${packageId}`;
-              const idxRaw = e.index;
-              const idxStr =
-                idxRaw !== undefined && idxRaw !== null && idxRaw !== ''
-                  ? String(idxRaw)
-                  : '';
-              const slugPath = slugPaths.get(packageId);
-              const canExposeEntryCode =
-                entryCodePolicy === 'always' ||
-                (entryCodePolicy === 'checked_in' && isCheckedIn);
-              const entry_code = canExposeEntryCode
-                ? buildActivityRegistrationEntryCode(
-                    slugPath ?? null,
-                    idxStr || '0000',
-                  )
-                : null;
+        entries = entryLines.map((e) => {
+          const packageId = Number(e.package_id);
+          const packageName =
+            packagePathById.get(packageId) ??
+            packageNameById.get(packageId) ??
+            `ค่าสมัครแพ็กเกจ #${packageId}`;
+          const idxStr = e.index?.trim() ?? '';
+          const slugPath = slugPaths.get(packageId);
+          const canExposeEntryCode =
+            entryCodePolicy === 'always' ||
+            (entryCodePolicy === 'checked_in' && isCheckedIn);
+          const entry_code = canExposeEntryCode
+            ? e.entry_code?.trim() ||
+              buildActivityRegistrationEntryCode(
+                slugPath ?? null,
+                idxStr || '0000',
+              )
+            : null;
 
-              const optIso = (v: unknown): string | null =>
-                v != null && String(v).trim() !== '' ? String(v).trim() : null;
-              const optNote = (v: unknown): string | null =>
-                v != null && String(v).trim() !== '' ? String(v).trim() : null;
+          const optIso = (v: string | null | undefined): string | null =>
+            v != null && String(v).trim() !== '' ? String(v).trim() : null;
+          const optNote = (v: string | null | undefined): string | null =>
+            v != null && String(v).trim() !== '' ? String(v).trim() : null;
 
-              return {
-                ...(idxStr ? { index: idxStr } : {}),
-                ...(canExposeEntryCode && entry_code ? { entry_code } : {}),
-                package_id: packageId,
-                package_name: packageName,
-                quantity: Number(e.quantity),
-                unit_price: Number(e.unit_price),
-                line_total: Number(e.line_total),
-                checked_out_at:
-                  e.checked_out_at != null &&
-                  String(e.checked_out_at).trim() !== ''
-                    ? String(e.checked_out_at)
-                    : null,
-                checked_out_by_name:
-                  e.checked_out_by_name != null &&
-                  String(e.checked_out_by_name).trim() !== ''
-                    ? String(e.checked_out_by_name)
-                    : null,
-                checkout_requested_at: optIso(e.checkout_requested_at),
-                checkout_request_note: optNote(e.checkout_request_note),
-                checkout_request_email_sent_at: optIso(
-                  e.checkout_request_email_sent_at,
-                ),
-                checkout_remark: optNote(e.checkout_remark),
-              };
-            });
-          }
-        } catch {
-          entries = [];
-        }
+          return {
+            ...(idxStr ? { index: idxStr } : {}),
+            ...(canExposeEntryCode && entry_code ? { entry_code } : {}),
+            package_id: packageId,
+            package_name: packageName,
+            quantity: Number(e.quantity),
+            unit_price: Number(e.unit_price),
+            line_total: Number(e.line_total),
+            checked_out_at: optIso(e.checked_out_at),
+            checked_out_by_name: optNote(e.checked_out_by_name),
+            checkout_requested_at: optIso(e.checkout_requested_at),
+            checkout_request_note: optNote(e.checkout_request_note),
+            checkout_request_email_sent_at: optIso(
+              e.checkout_request_email_sent_at,
+            ),
+            checkout_remark: optNote(e.checkout_remark),
+          };
+        });
 
         activity = await this.activityRepository.findOne({
           where: { id: registration.activity_id },
         });
+
+        classChanges =
+          await this.activityRegistrationService.listClassChangesForRegistration(
+            registration.id,
+          );
       }
     } else if (order.type === OrderType.SPONSOR) {
       sponsor = await this.sponsorRepository.findOne({
@@ -557,6 +555,7 @@ export class OrderService {
       sponsor,
       activity,
       entries,
+      class_changes: classChanges,
     };
   }
 
@@ -594,41 +593,20 @@ export class OrderService {
     if (!target) {
       throw new BadRequestException('กรุณาระบุรายการ');
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(registration.entries_json || '[]');
-    } catch {
-      throw new BadRequestException('ข้อมูลรายการไม่ถูกต้อง');
-    }
-    if (!Array.isArray(parsed)) {
-      throw new BadRequestException('ข้อมูลรายการไม่ถูกต้อง');
-    }
-    const entries = parsed as Record<string, unknown>[];
     const nowIso = new Date().toISOString();
-    let touched = false;
-    const next = entries.map((e) => {
-      const idx =
-        e.index != null && String(e.index).trim() !== ''
-          ? String(e.index).trim()
-          : '';
-      if (idx !== target) {
-        return e;
-      }
-      touched = true;
-      if (e.checked_out_at != null && String(e.checked_out_at).trim() !== '') {
+    await this.entryService.updateEntry(registration, target, (line) => {
+      if (
+        line.checked_out_at != null &&
+        String(line.checked_out_at).trim() !== ''
+      ) {
         throw new BadRequestException('รายการนี้ checkout แล้ว');
       }
       return {
-        ...e,
+        ...line,
         checkout_requested_at: nowIso,
         checkout_request_note: note && note.length > 0 ? note : null,
       };
     });
-    if (!touched) {
-      throw new NotFoundException('ไม่พบรายการตามเลขลำดับที่ระบุ');
-    }
-    registration.entries_json = JSON.stringify(next);
-    await this.registrationRepository.save(registration);
     return { success: true };
   }
 
@@ -693,7 +671,7 @@ export class OrderService {
         'order.total_amount AS total_amount',
         'order.created_at AS created_at',
         'reg.applicant_name AS applicant_name',
-        'reg.entries_json AS entries_json',
+        'reg.id AS registration_id',
         'user.avatar_url AS avatar_url',
         'act.title AS activity_title',
         'order.receipt_email_sent_at AS receipt_email_sent_at',
@@ -704,19 +682,21 @@ export class OrderService {
       .limit(safeLimit)
       .getRawMany();
 
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (raws || []).map((r: { registration_id: number }) =>
+        Number(r.registration_id),
+      ),
+    );
+
     const items = (raws || []).map((r: any) => {
       let entries_summary = '—';
-      try {
-        const entries = JSON.parse(r.entries_json || '[]');
-        if (Array.isArray(entries) && entries.length > 0) {
-          const totalQty = entries.reduce(
-            (s: number, e: any) => s + (Number(e.quantity) || 0),
-            0,
-          );
-          entries_summary = `${totalQty} รายการ`;
-        }
-      } catch {
-        // keep default
+      const lines = linesMap.get(Number(r.registration_id)) ?? [];
+      if (lines.length > 0) {
+        const totalQty = lines.reduce(
+          (s, e) => s + (Number(e.quantity) || 0),
+          0,
+        );
+        entries_summary = `${totalQty} รายการ`;
       }
       return {
         order_id: Number(r.order_id),
@@ -754,7 +734,6 @@ export class OrderService {
       id: number;
       applicant_name: string;
       payment_slip: string | null;
-      entries_json: string;
     } | null;
     activity: { id: number; title: string } | null;
     entries: {
@@ -785,64 +764,60 @@ export class OrderService {
       unit_price: number;
       line_total: number;
     }[] = [];
+    let entryLines: Awaited<
+      ReturnType<ActivityRegistrationEntryService['resolveLinesForRegistration']>
+    > = [];
 
     registration = await this.registrationRepository.findOne({
       where: { id: order.refer_id },
     });
 
     if (registration) {
-      try {
-        const parsed = JSON.parse(registration.entries_json);
-        if (Array.isArray(parsed)) {
-          const packageIds = parsed
-            .map((e: any) => Number(e.package_id))
-            .filter((id: number) => !Number.isNaN(id));
+      entryLines =
+        await this.entryService.resolveLinesForRegistration(registration);
+      const packageIds = entryLines
+        .map((e) => Number(e.package_id))
+        .filter((id) => !Number.isNaN(id));
 
-          const packages = packageIds.length
-            ? await this.activityPackageRepository.find({
-                where: { id: In(packageIds) },
-              })
-            : [];
+      const packages = packageIds.length
+        ? await this.activityPackageRepository.find({
+            where: { id: In(packageIds) },
+          })
+        : [];
 
-          const packageNameById = new Map<number, string>(
-            (packages || []).map((p) => [p.id, p.name]),
+      const packageNameById = new Map<number, string>(
+        (packages || []).map((p) => [p.id, p.name]),
+      );
+      const packagePathById =
+        await this.loadPackageNamePathByLeafIds(packageIds);
+
+      const slugPaths =
+        await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
+
+      entries = entryLines.map((e) => {
+        const packageId = Number(e.package_id);
+        const packageName =
+          packagePathById.get(packageId) ??
+          packageNameById.get(packageId) ??
+          `ค่าสมัครแพ็กเกจ #${packageId}`;
+        const idxStr = e.index?.trim() ?? '';
+        const slugPath = slugPaths.get(packageId);
+        const entry_code =
+          e.entry_code?.trim() ||
+          buildActivityRegistrationEntryCode(
+            slugPath ?? null,
+            idxStr || '0000',
           );
-          const packagePathById =
-            await this.loadPackageNamePathByLeafIds(packageIds);
-
-          const slugPaths =
-            await this.loadPackageSlugPathFromLayer2ByLeafIds(packageIds);
-
-          entries = parsed.map((e: any) => {
-            const packageId = Number(e.package_id);
-            const packageName =
-              packagePathById.get(packageId) ??
-              packageNameById.get(packageId) ??
-              `ค่าสมัครแพ็กเกจ #${packageId}`;
-            const idxRaw = e.index;
-            const idxStr =
-              idxRaw !== undefined && idxRaw !== null && idxRaw !== ''
-                ? String(idxRaw)
-                : '';
-            const slugPath = slugPaths.get(packageId);
-            const entry_code = buildActivityRegistrationEntryCode(
-              slugPath ?? null,
-              idxStr || '0000',
-            );
-            return {
-              ...(idxStr ? { index: idxStr } : {}),
-              ...(entry_code ? { entry_code } : {}),
-              package_id: packageId,
-              package_name: packageName,
-              quantity: Number(e.quantity),
-              unit_price: Number(e.unit_price),
-              line_total: Number(e.line_total),
-            };
-          });
-        }
-      } catch {
-        entries = [];
-      }
+        return {
+          ...(idxStr ? { index: idxStr } : {}),
+          ...(entry_code ? { entry_code } : {}),
+          package_id: packageId,
+          package_name: packageName,
+          quantity: Number(e.quantity),
+          unit_price: Number(e.unit_price),
+          line_total: Number(e.line_total),
+        };
+      });
       activity = await this.activityRepository.findOne({
         where: { id: registration.activity_id },
       });
@@ -865,7 +840,6 @@ export class OrderService {
             id: registration.id,
             applicant_name: registration.applicant_name,
             payment_slip: registration.payment_slip,
-            entries_json: registration.entries_json,
           }
         : null,
       activity: activity ? { id: activity.id, title: activity.title } : null,
@@ -1605,47 +1579,7 @@ export class OrderService {
       Math.max(1, limit),
       CHECKOUT_REQUEST_EMAIL_BATCH_HARD_MAX,
     );
-    const scanCap = Math.min(2000, safeLimit * 25);
-    const regs = await this.registrationRepository
-      .createQueryBuilder('r')
-      .innerJoin(Order, 'o', 'o.refer_id = r.id')
-      .where('o.type = :otype', { otype: OrderType.ACTIVITY_REGISTRATION })
-      .andWhere('o.status = :paid', { paid: OrderStatus.PAID })
-      .andWhere('r.checked_in_at IS NOT NULL')
-      .andWhere("r.entries_json LIKE :pat", {
-        pat: '%checkout_requested_at%',
-      })
-      .orderBy('r.updated_at', 'ASC')
-      .take(scanCap)
-      .getMany();
-
-    const jobs: { registrationId: number; entryIndex: string }[] = [];
-    for (const r of regs) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(r.entries_json || '[]');
-      } catch {
-        continue;
-      }
-      if (!Array.isArray(parsed)) continue;
-      for (const e of parsed as Record<string, unknown>[]) {
-        const idx = e.index != null ? String(e.index).trim() : '';
-        if (!idx) continue;
-        const reqOk =
-          e.checkout_requested_at != null &&
-          String(e.checkout_requested_at).trim() !== '';
-        const sent =
-          e.checkout_request_email_sent_at != null &&
-          String(e.checkout_request_email_sent_at).trim() !== '';
-        const out =
-          e.checked_out_at != null && String(e.checked_out_at).trim() !== '';
-        if (reqOk && !sent && !out) {
-          jobs.push({ registrationId: r.id, entryIndex: idx });
-          if (jobs.length >= safeLimit) return jobs;
-        }
-      }
-    }
-    return jobs;
+    return this.entryService.findPendingCheckoutEmailJobs(safeLimit);
   }
 
   /**
@@ -1687,20 +1621,10 @@ export class OrderService {
       return false;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(registration.entries_json || '[]');
-    } catch {
-      return false;
-    }
-    if (!Array.isArray(parsed)) {
-      return false;
-    }
-    const entries = parsed as Record<string, unknown>[];
-    const row = entries.find((e) => {
-      const idx = e.index != null ? String(e.index).trim() : '';
-      return idx === target;
-    });
+    const entries = await this.entryService.resolveLinesForRegistration(
+      registration,
+    );
+    const row = entries.find((e) => e.index === target);
     if (!row) {
       return false;
     }
@@ -1768,16 +1692,10 @@ ${noteBlock}
 
     if (mailed) {
       const nowIso = new Date().toISOString();
-      const next = entries.map((e) => {
-        const idx = e.index != null ? String(e.index).trim() : '';
-        if (idx !== target) return e;
-        return {
-          ...e,
-          checkout_request_email_sent_at: nowIso,
-        };
-      });
-      registration.entries_json = JSON.stringify(next);
-      await this.registrationRepository.save(registration);
+      await this.entryService.updateEntry(registration, target, (line) => ({
+        ...line,
+        checkout_request_email_sent_at: nowIso,
+      }));
     }
 
     return mailed;

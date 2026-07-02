@@ -26,7 +26,6 @@ import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import {
   allocateFormattedActivityEntryIndices,
-  maxNumericIndexFromParsedEntries,
 } from '../common/utils/activity-entry-index.util';
 import {
   ActivityLiveEmbed,
@@ -44,6 +43,10 @@ import {
 } from '../common/utils/onsite-cash.util';
 import { UserActionLogService } from '../user-action-log/user-action-log.service';
 import { LegalPolicyService } from '../legal/legal-policy.service';
+import {
+  ActivityRegistrationEntryService,
+  type ActivityRegistrationEntryLine,
+} from '../activity-registration/activity-registration-entry.service';
 
 const UPLOAD_SUBDIR = 'activities' as const;
 
@@ -105,6 +108,7 @@ export class ActivityService {
     private readonly orderService: OrderService,
     private readonly userActionLogService: UserActionLogService,
     private readonly legalPolicyService: LegalPolicyService,
+    private readonly entryService: ActivityRegistrationEntryService,
   ) {}
 
   async findAll(): Promise<Activity[]> {
@@ -201,23 +205,10 @@ export class ActivityService {
   }
 
   /**
-   * เลขลำดับรายการสมัครล่าสุดของกิจกรรม (ดูจาก entries_json ของทุกใบสมัครใน activity เดียวกัน)
+   * เลขลำดับรายการสมัครล่าสุดของกิจกรรม (ดูจาก activity_registration_entries)
    */
   async getMaxEntryIndexForActivity(activityId: number): Promise<number> {
-    const rows = await this.registrationRepository.find({
-      where: { activity_id: activityId },
-      select: ['entries_json'],
-    });
-    let max = 0;
-    for (const r of rows) {
-      try {
-        const parsed = JSON.parse(r.entries_json || '[]');
-        max = Math.max(max, maxNumericIndexFromParsedEntries(parsed));
-      } catch {
-        // ignore malformed json
-      }
-    }
-    return max;
+    return this.entryService.getMaxEntryIndexForActivity(activityId);
   }
 
   private assertRegistrationAllowed(
@@ -341,14 +332,7 @@ export class ActivityService {
       );
 
     let idxPos = 0;
-    const storedLines: {
-      index: string;
-      entry_code: string;
-      package_id: number;
-      quantity: number;
-      unit_price: number;
-      line_total: number;
-    }[] = [];
+    const storedLines: ActivityRegistrationEntryLine[] = [];
     for (const i of items) {
       for (let k = 0; k < i.quantity; k++) {
         const idxStr = formattedIndices[idxPos++]!;
@@ -379,12 +363,12 @@ export class ActivityService {
       email: payload.email ?? null,
       line: payload.line ?? null,
       note: payload.note ?? null,
-      entries_json: JSON.stringify(storedLines),
       total_amount,
       payment_slip: payload.payment_slip ?? null,
     });
 
     const saved = await this.registrationRepository.save(entity);
+    await this.entryService.createLines(saved.id, storedLines);
 
     await this.legalPolicyService.recordAcceptances({
       userId,
@@ -505,14 +489,7 @@ export class ActivityService {
       );
 
     let idxPos = 0;
-    const storedLines: {
-      index: string;
-      entry_code: string;
-      package_id: number;
-      quantity: number;
-      unit_price: number;
-      line_total: number;
-    }[] = [];
+    const storedLines: ActivityRegistrationEntryLine[] = [];
     for (const i of items) {
       for (let k = 0; k < i.quantity; k++) {
         const idxStr = formattedIndices[idxPos++]!;
@@ -543,12 +520,12 @@ export class ActivityService {
       email: payload.email ?? null,
       line: payload.line ?? null,
       note: payload.note ?? null,
-      entries_json: JSON.stringify(storedLines),
       total_amount,
       payment_slip: null,
     });
 
     const saved = await this.registrationRepository.save(entity);
+    await this.entryService.createLines(saved.id, storedLines);
 
     await this.legalPolicyService.recordAcceptances({
       userId,

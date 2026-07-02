@@ -10,6 +10,10 @@ import { ActivityPackage } from '../entities/activity-package.entity';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { User } from '../entities/user.entity';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
+import {
+  ActivityRegistrationEntryService,
+  type ActivityRegistrationEntryLine,
+} from '../activity-registration/activity-registration-entry.service';
 
 export interface ActivityAttendanceActivitySummary {
   activity_id: number;
@@ -99,7 +103,7 @@ export interface ActivityPaidPackageCountRow {
   slug: string | null;
   /** ชื่อแบบลำดับชั้น (กลุ่ม / คลาส / …) ให้ตรงกับรายงานผู้เข้าร่วม */
   path_label: string;
-  /** ผลรวม quantity จาก entries_json ต่อ package */
+  /** ผลรวม quantity จาก activity_registration_entries ต่อ package */
   item_count: number;
 }
 
@@ -148,15 +152,30 @@ export class ReportService {
     @InjectRepository(ActivityPackage)
     private readonly activityPackageRepository: Repository<ActivityPackage>,
     private readonly receiptPuppeteer: ReceiptPuppeteerService,
+    private readonly entryService: ActivityRegistrationEntryService,
   ) {}
 
-  private parseEntries(raw: string): EntryJsonRow[] {
-    try {
-      const parsed = JSON.parse(raw || '[]');
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+  private linesForReportRow(
+    row: { registration_id?: number | string },
+    linesMap: Map<number, ActivityRegistrationEntryLine[]>,
+  ): ActivityRegistrationEntryLine[] {
+    const registrationId = Number(row.registration_id);
+    if (!Number.isFinite(registrationId) || registrationId <= 0) return [];
+    return linesMap.get(registrationId) ?? [];
+  }
+
+  private toEntryJsonRows(
+    lines: ActivityRegistrationEntryLine[],
+  ): EntryJsonRow[] {
+    return lines.map((line) => ({
+      index: line.index,
+      entry_code: line.entry_code ?? undefined,
+      package_id: line.package_id,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      line_total: line.line_total,
+      checked_out_at: line.checked_out_at,
+    }));
   }
 
   private toIsoOrNull(raw: unknown): string | null {
@@ -350,11 +369,11 @@ export class ReportService {
   }
 
   private buildEntryRowsForRegistration(
-    entriesJson: string,
     slugPathMap: Map<number, string>,
     namePathMap: Map<number, string>,
+    lines: ActivityRegistrationEntryLine[],
   ): ActivityAttendanceEntryRow[] {
-    const entries = this.parseEntries(entriesJson);
+    const entries = this.toEntryJsonRows(lines);
     const rows: ActivityAttendanceEntryRow[] = [];
     let rowNo = 0;
     for (const e of entries) {
@@ -636,7 +655,6 @@ export class ReportService {
       .addSelect('reg.email', 'applicant_email')
       .addSelect('reg.farm_name', 'farm_name')
       .addSelect('reg.user_id', 'user_id')
-      .addSelect('reg.entries_json', 'entries_json')
       .addSelect('reg.checked_in_at', 'checked_in_at')
       .addSelect('reg.created_at', 'registration_created_at')
       .addSelect('o.order_no', 'order_no')
@@ -648,9 +666,15 @@ export class ReportService {
       .orderBy('reg.created_at', 'DESC')
       .getRawMany();
 
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (raws || []).map((r) => Number(r.registration_id)),
+    );
+
     const allPackageIds: number[] = [];
     for (const r of raws || []) {
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.toEntryJsonRows(
+        this.linesForReportRow(r, linesMap),
+      );
       for (const e of entries) {
         const id = Number(e.package_id);
         if (!Number.isNaN(id)) allPackageIds.push(id);
@@ -702,9 +726,9 @@ export class ReportService {
         checked_in_at: checkedIso,
         registered_at: registeredIso,
         entries: this.buildEntryRowsForRegistration(
-          String(r.entries_json ?? '[]'),
           slugPathMap,
           namePathMap,
+          this.linesForReportRow(r, linesMap),
         ),
       };
 
@@ -814,7 +838,7 @@ export class ReportService {
   }
 
   /**
-   * จำนวนรายการสมัครต่อคลาส/แพ็กเกจ (ผลรวม quantity ใน entries_json)
+   * จำนวนรายการสมัครต่อคลาส/แพ็กเกจ (ผลรวม quantity ใน activity_registration_entries)
    * เฉพาะการสมัครที่มี Order ประเภท activity_registration และสถานะ paid
    */
   async getActivityPaidPackageItemCounts(
@@ -839,14 +863,20 @@ export class ReportService {
         },
       )
       .where('reg.activity_id = :aid', { aid: activityId })
-      .select('reg.entries_json', 'entries_json')
+      .select('reg.id', 'registration_id')
       .getRawMany();
+
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (raws || []).map((r) => Number(r.registration_id)),
+    );
 
     const countByPackage = new Map<number, number>();
     const packageIds: number[] = [];
 
     for (const r of raws || []) {
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.toEntryJsonRows(
+        this.linesForReportRow(r, linesMap),
+      );
       for (const e of entries) {
         const pid = Number(e.package_id);
         if (!Number.isFinite(pid) || pid <= 0) continue;
@@ -933,11 +963,14 @@ export class ReportService {
       .addSelect('reg.applicant_name', 'applicant_name')
       .addSelect('reg.phone', 'phone')
       .addSelect('reg.farm_name', 'farm_name')
-      .addSelect('reg.entries_json', 'entries_json')
       .addSelect('reg.created_at', 'registered_at')
       .addSelect('o.order_no', 'order_no')
       .orderBy('reg.created_at', 'ASC')
       .getRawMany();
+
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (raws || []).map((r) => Number(r.registration_id)),
+    );
 
     const pathMap = await this.buildPackageNamePathMap([packageId]);
     const packageRows = await this.activityPackageRepository.find({
@@ -954,7 +987,9 @@ export class ReportService {
     const items: ActivityPaidPackageCountItemDetailRow[] = [];
     let totalItems = 0;
     for (const r of raws || []) {
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.toEntryJsonRows(
+        this.linesForReportRow(r, linesMap),
+      );
       for (const e of entries) {
         const pid = Number(e.package_id);
         if (pid !== packageId) continue;

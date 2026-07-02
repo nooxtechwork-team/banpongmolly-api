@@ -10,6 +10,7 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity, ActivityStatus } from '../entities/activity.entity';
 import { User } from '../entities/user.entity';
 import { CheckInGateway } from './check-in.gateway';
+import { ActivityRegistrationEntryService, type ActivityRegistrationEntryLine } from '../activity-registration/activity-registration-entry.service';
 
 export interface CheckInLookupResult {
   registration_id: number;
@@ -143,7 +144,28 @@ export class CheckInService {
     @InjectRepository(Activity)
     private readonly activityRepository: Repository<Activity>,
     private readonly checkInGateway: CheckInGateway,
+    private readonly entryService: ActivityRegistrationEntryService,
   ) {}
+
+  private assertWithinCheckInTime(activity: Activity): void {
+    const now = new Date();
+    if (
+      activity.check_in_open_at &&
+      now.getTime() < activity.check_in_open_at.getTime()
+    ) {
+      throw new BadRequestException(
+        `ยังไม่ถึงเวลาเปิดเช็คอิน (เริ่มเช็คอินได้ตั้งแต่ ${activity.check_in_open_at.toLocaleString('th-TH')})`,
+      );
+    }
+    if (
+      activity.check_in_close_at &&
+      now.getTime() > activity.check_in_close_at.getTime()
+    ) {
+      throw new BadRequestException(
+        `หมดเวลาเช็คอินแล้ว (ปิดเช็คอินเมื่อ ${activity.check_in_close_at.toLocaleString('th-TH')})`,
+      );
+    }
+  }
 
   private assertWithinCheckInGeofence(
     activity: Activity,
@@ -151,12 +173,14 @@ export class CheckInService {
   ): void {
     if (!activity.check_in_geofence_enabled) return;
 
-    const venueLat = activity.location_latitude != null
-      ? Number(activity.location_latitude)
-      : NaN;
-    const venueLng = activity.location_longitude != null
-      ? Number(activity.location_longitude)
-      : NaN;
+    const venueLat =
+      activity.location_latitude != null
+        ? Number(activity.location_latitude)
+        : NaN;
+    const venueLng =
+      activity.location_longitude != null
+        ? Number(activity.location_longitude)
+        : NaN;
 
     if (!Number.isFinite(venueLat) || !Number.isFinite(venueLng)) {
       throw new BadRequestException(
@@ -177,7 +201,10 @@ export class CheckInService {
       );
     }
 
-    const radiusM = Math.max(50, Number(activity.check_in_geofence_radius_m) || 200);
+    const radiusM = Math.max(
+      50,
+      Number(activity.check_in_geofence_radius_m) || 200,
+    );
     const distanceM = haversineDistanceM(userLat, userLng, venueLat, venueLng);
     if (distanceM > radiusM) {
       throw new BadRequestException(
@@ -241,17 +268,13 @@ export class CheckInService {
           : 'ยกเลิก';
 
     let entriesLabel = '—';
-    try {
-      const entries = JSON.parse(reg.entries_json || '[]');
-      if (Array.isArray(entries) && entries.length > 0) {
-        const totalQty = entries.reduce(
-          (s: number, e: any) => s + (Number(e.quantity) || 0),
-          0,
-        );
-        entriesLabel = `${totalQty} รายการ`;
-      }
-    } catch {
-      // keep default
+    const entryLines = await this.entryService.resolveLinesForRegistration(reg);
+    if (entryLines.length > 0) {
+      const totalQty = entryLines.reduce(
+        (s, e) => s + (Number(e.quantity) || 0),
+        0,
+      );
+      entriesLabel = `${totalQty} รายการ`;
     }
 
     return {
@@ -282,6 +305,14 @@ export class CheckInService {
     if (!reg) {
       throw new NotFoundException('ไม่พบข้อมูลการสมัคร');
     }
+    const activity = await this.activityRepository.findOne({
+      where: { id: reg.activity_id },
+    });
+
+    if (activity) {
+      this.assertWithinCheckInTime(activity);
+    }
+
     if (reg.checked_in_at) {
       throw new BadRequestException(
         'เช็คอินไปแล้วเมื่อ ' + reg.checked_in_at.toLocaleString('th-TH'),
@@ -501,7 +532,9 @@ export class CheckInService {
     return items;
   }
 
-  async listMyCheckInActivities(userId: number): Promise<MyCheckInActivityItem[]> {
+  async listMyCheckInActivities(
+    userId: number,
+  ): Promise<MyCheckInActivityItem[]> {
     const raws = await this.orderRepository
       .createQueryBuilder('o')
       .innerJoin(ActivityRegistration, 'reg', 'reg.id = o.refer_id')
@@ -513,6 +546,8 @@ export class CheckInService {
         'a.start_date AS start_date',
         'a.end_date AS end_date',
         'a.location_name AS location_name',
+        'a.check_in_open_at AS check_in_open_at',
+        'a.check_in_close_at AS check_in_close_at',
         'reg.id AS registration_id',
         'reg.registration_no AS registration_no',
         'reg.checked_in_at AS checked_in_at',
@@ -534,6 +569,22 @@ export class CheckInService {
           : row.checked_in_at
             ? String(row.checked_in_at)
             : null;
+      const now = new Date();
+      const openAt =
+        row.check_in_open_at instanceof Date
+          ? row.check_in_open_at
+          : row.check_in_open_at
+            ? new Date(String(row.check_in_open_at))
+            : null;
+      const closeAt =
+        row.check_in_close_at instanceof Date
+          ? row.check_in_close_at
+          : row.check_in_close_at
+            ? new Date(String(row.check_in_close_at))
+            : null;
+      const withinWindow =
+        (!openAt || now.getTime() >= openAt.getTime()) &&
+        (!closeAt || now.getTime() <= closeAt.getTime());
       return {
         activity_id: Number(row.activity_id),
         title: row.title ?? '',
@@ -554,7 +605,7 @@ export class CheckInService {
             ? String(row.order_no).trim()
             : null,
         checked_in_at: checkedInAt,
-        can_check_in: !checkedInAt,
+        can_check_in: !checkedInAt && withinWindow,
       };
     });
   }
@@ -576,6 +627,7 @@ export class CheckInService {
       throw new NotFoundException('ไม่พบกิจกรรม');
     }
 
+    this.assertWithinCheckInTime(activity);
     this.assertWithinCheckInGeofence(activity, coords);
 
     const raw = await this.orderRepository
@@ -586,7 +638,6 @@ export class CheckInService {
         'reg.registration_no AS registration_no',
         'reg.applicant_name AS applicant_name',
         'reg.phone AS phone',
-        'reg.entries_json AS entries_json',
         'reg.total_amount AS total_amount',
         'reg.checked_in_at AS checked_in_at',
         'o.order_no AS order_no',
@@ -603,7 +654,18 @@ export class CheckInService {
       );
     }
 
-    const entries = this.parseRegistrationEntries(String(raw.entries_json ?? '[]'));
+    const registration = await this.registrationRepository.findOne({
+      where: { id: Number(raw.registration_id) },
+    });
+    if (!registration) {
+      throw new BadRequestException(
+        'คุณยังไม่มีใบสมัครที่ชำระเงินแล้วสำหรับกิจกรรมนี้',
+      );
+    }
+
+    const entryLines =
+      await this.entryService.resolveLinesForRegistration(registration);
+    const entries = this.entryLinesToPreviewEntries(entryLines);
     const checkedInAt =
       raw.checked_in_at instanceof Date
         ? raw.checked_in_at.toISOString()
@@ -634,7 +696,11 @@ export class CheckInService {
     userId: number,
     code: string,
     coords?: CheckInGeoCoords | null,
-  ): Promise<{ checked_in_at: string; registration_no: string; activity_title: string }> {
+  ): Promise<{
+    checked_in_at: string;
+    registration_no: string;
+    activity_title: string;
+  }> {
     const activityId = parseActivityCheckInCode(code);
     if (activityId == null) {
       throw new BadRequestException('QR Code ไม่ถูกต้อง');
@@ -642,22 +708,16 @@ export class CheckInService {
     return this.submitSelfCheckIn(userId, activityId, code, coords);
   }
 
-  private parseRegistrationEntries(
-    entriesJson: string,
+  private entryLinesToPreviewEntries(
+    lines: ActivityRegistrationEntryLine[],
   ): CheckInSelfPreviewEntry[] {
-    try {
-      const parsed = JSON.parse(entriesJson || '[]');
-      if (!Array.isArray(parsed)) return [];
-      return parsed.map((entry: any) => ({
-        package_name: String(entry?.package_name ?? entry?.name ?? '—').trim() || '—',
-        quantity: Number(entry?.quantity) || 1,
-        unit_price: Number(entry?.unit_price) || 0,
-        line_total: Number(entry?.line_total) || 0,
-        entry_code: entry?.entry_code != null ? String(entry.entry_code) : null,
-      }));
-    } catch {
-      return [];
-    }
+    return lines.map((line) => ({
+      package_name: '—',
+      quantity: Number(line.quantity) || 1,
+      unit_price: Number(line.unit_price) || 0,
+      line_total: Number(line.line_total) || 0,
+      entry_code: line.entry_code != null ? String(line.entry_code) : null,
+    }));
   }
 
   async submitSelfCheckIn(
@@ -665,7 +725,11 @@ export class CheckInService {
     activityId: number,
     code: string,
     coords?: CheckInGeoCoords | null,
-  ): Promise<{ checked_in_at: string; registration_no: string; activity_title: string }> {
+  ): Promise<{
+    checked_in_at: string;
+    registration_no: string;
+    activity_title: string;
+  }> {
     const parsedActivityId = parseActivityCheckInCode(code);
     if (parsedActivityId == null) {
       throw new BadRequestException('QR Code ไม่ถูกต้อง');
@@ -681,6 +745,7 @@ export class CheckInService {
       throw new NotFoundException('ไม่พบกิจกรรม');
     }
 
+    this.assertWithinCheckInTime(activity);
     this.assertWithinCheckInGeofence(activity, coords);
 
     const raw = await this.orderRepository
@@ -694,7 +759,9 @@ export class CheckInService {
       .getRawOne();
 
     if (!raw?.registration_id) {
-      throw new BadRequestException('คุณยังไม่มีใบสมัครที่ชำระเงินแล้วสำหรับกิจกรรมนี้');
+      throw new BadRequestException(
+        'คุณยังไม่มีใบสมัครที่ชำระเงินแล้วสำหรับกิจกรรมนี้',
+      );
     }
 
     const result = await this.submit(Number(raw.registration_id));

@@ -31,6 +31,20 @@ export class CheckOutController {
     return this.checkOutService.getActivitiesSummary(pageNum, limitNum);
   }
 
+  @Get('lookup')
+  async lookup(
+    @Query('activity_id') activityIdRaw?: string,
+    @Query('q') q?: string,
+  ) {
+    const activityId = activityIdRaw
+      ? parseInt(activityIdRaw, 10)
+      : Number.NaN;
+    if (!Number.isFinite(activityId) || activityId < 1) {
+      throw new BadRequestException('กรุณาระบุ activity_id');
+    }
+    return this.checkOutService.lookupForCheckOut(activityId, q || '');
+  }
+
   @Get('activity/:activityId/items')
   async listActivityItems(
     @Param('activityId', ParseIntPipe) activityId: number,

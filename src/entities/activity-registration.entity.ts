@@ -47,15 +47,6 @@ export class ActivityRegistration {
   @Column({ type: 'text', nullable: true })
   note: string | null;
 
-  /**
-   * JSON string: [{ index, entry_code, package_id, quantity (1 ต่อแถว), unit_price, line_total,
-   *   checked_out_at?, checked_out_by_*, checkout_requested_at?, checkout_request_note?,
-   *   checkout_request_email_sent_at? (เวลาที่สคริปต์ส่งอีเมลแจ้งเจ้าหน้าที่สำเร็จ),
-   *   checkout_remark? (หมายเหตุแอดมินตอนยืนยัน checkout) }, ...]
-   */
-  @Column({ type: 'text' })
-  entries_json: string;
-
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   total_amount: number;
 

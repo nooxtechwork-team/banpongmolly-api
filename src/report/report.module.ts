@@ -10,6 +10,7 @@ import { ReportService } from './report.service';
 import { ReportController } from './report.controller';
 import { ActivityPackageCountsController } from './activity-package-counts.controller';
 import { CheckInOutReportController } from './check-in-out.controller';
+import { ActivityRegistrationModule } from '../activity-registration/activity-registration.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CheckInOutReportController } from './check-in-out.controller';
     ]),
     AuthModule,
     OrderModule,
+    ActivityRegistrationModule,
   ],
   controllers: [
     ReportController,

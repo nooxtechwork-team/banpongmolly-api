@@ -19,6 +19,7 @@ import { ActivityPackageModule } from '../activity-package/activity-package.modu
 import { OrderModule } from '../order/order.module';
 import { UserActionLogModule } from '../user-action-log/user-action-log.module';
 import { LegalModule } from '../legal/legal.module';
+import { ActivityRegistrationModule } from '../activity-registration/activity-registration.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { LegalModule } from '../legal/legal.module';
     UploadModule,
     ActivityPackageModule,
     forwardRef(() => OrderModule),
+    forwardRef(() => ActivityRegistrationModule),
     UserActionLogModule,
     LegalModule,
   ],

@@ -30,7 +30,7 @@ export function parseActivityEntryIndex(value: unknown): number | null {
 }
 
 /**
- * หาเลขลำดับสูงสุดจากอาร์เรย์รายการที่ parse จาก entries_json แล้ว
+ * หาเลขลำดับสูงสุดจากรายการสมัครที่ parse แล้ว
  */
 export function maxNumericIndexFromParsedEntries(entries: unknown): number {
   if (!Array.isArray(entries)) return 0;

@@ -15,12 +15,17 @@ import { ResponseInterceptor } from '../common/interceptors/response.interceptor
 import { User } from '../entities/user.entity';
 import { OrderService } from './order.service';
 import { OrderStatus, OrderType } from '../entities/order.entity';
+import { ActivityRegistrationService } from '../activity-registration/activity-registration.service';
+import { ChangeRegistrationClassDto } from '../activity-registration/dto/change-registration-class.dto';
 
 @Controller('my/orders')
 @UseGuards(JwtAuthGuard)
 @UseInterceptors(ResponseInterceptor)
 export class MyOrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly activityRegistrationService: ActivityRegistrationService,
+  ) {}
 
   @Get()
   async listMyOrders(
@@ -85,6 +90,20 @@ export class MyOrderController {
       orderNo,
       String(entryIndex || ''),
       note?.trim() || null,
+    );
+  }
+
+  /** ขอเปลี่ยนคลาสรายการสมัคร (แจ้งเจ้าหน้าที่) */
+  @Post(':orderNo/entries/class-change-request')
+  async requestClassChange(
+    @Request() req: { user: User },
+    @Param('orderNo') orderNo: string,
+    @Body() dto: ChangeRegistrationClassDto,
+  ) {
+    return this.activityRegistrationService.requestClassChange(
+      req.user.id,
+      orderNo,
+      dto,
     );
   }
 

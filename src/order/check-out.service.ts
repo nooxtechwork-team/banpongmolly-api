@@ -11,6 +11,7 @@ import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { ActivityRegistrationEntryService, type ActivityRegistrationEntryLine } from '../activity-registration/activity-registration-entry.service';
 
 type EntryJsonRow = {
   index?: string;
@@ -91,15 +92,29 @@ export class CheckOutService {
     @InjectRepository(ActivityPackage)
     private readonly activityPackageRepository: Repository<ActivityPackage>,
     private readonly auditLogService: AuditLogService,
+    private readonly entryService: ActivityRegistrationEntryService,
   ) {}
 
-  private parseEntries(raw: string): EntryJsonRow[] {
-    try {
-      const parsed = JSON.parse(raw || '[]');
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+  private linesFromMap(
+    registrationId: number,
+    linesMap: Map<number, ActivityRegistrationEntryLine[]>,
+  ): EntryJsonRow[] {
+    const fromTable = linesMap.get(registrationId) ?? [];
+    return fromTable.map((line) => ({
+      index: line.index,
+      entry_code: line.entry_code ?? undefined,
+      package_id: line.package_id,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      line_total: line.line_total,
+      checked_out_at: line.checked_out_at,
+      checked_out_by_user_id: line.checked_out_by_user_id,
+      checked_out_by_name: line.checked_out_by_name,
+      checkout_requested_at: line.checkout_requested_at,
+      checkout_request_note: line.checkout_request_note,
+      checkout_request_email_sent_at: line.checkout_request_email_sent_at,
+      checkout_remark: line.checkout_remark,
+    }));
   }
 
   private async buildPackagePathMap(
@@ -194,12 +209,16 @@ export class CheckOutService {
       .innerJoin(Activity, 'act', 'act.id = reg.activity_id')
       .where('reg.checked_in_at IS NOT NULL')
       .select([
+        'reg.id AS registration_id',
         'reg.activity_id AS activity_id',
         'act.title AS activity_title',
-        'reg.entries_json AS entries_json',
       ])
       .orderBy('act.title', 'ASC')
       .getRawMany();
+
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (rows || []).map((r) => Number(r.registration_id)),
+    );
 
     const map = new Map<number, CheckoutActivitySummary>();
     for (const r of rows) {
@@ -214,7 +233,7 @@ export class CheckOutService {
         });
       }
       const summary = map.get(activityId)!;
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.linesFromMap(Number(r.registration_id), linesMap);
       for (const e of entries) {
         const qty = Math.max(1, Number(e.quantity) || 1);
         summary.total_items += qty;
@@ -276,7 +295,6 @@ export class CheckOutService {
         'reg.applicant_name AS applicant_name',
         'reg.email AS applicant_email',
         'reg.farm_name AS farm_name',
-        'reg.entries_json AS entries_json',
         'ord.id AS order_id',
         'ord.order_no AS order_no',
         'ord.created_at AS order_created_at',
@@ -286,9 +304,13 @@ export class CheckOutService {
       .addOrderBy('reg.id', 'DESC')
       .getRawMany();
 
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      rows.map((r) => Number(r.registration_id)),
+    );
+
     const packageIds: number[] = [];
     for (const r of rows) {
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.linesFromMap(Number(r.registration_id), linesMap);
       for (const e of entries) {
         const id = Number(e.package_id);
         if (!Number.isNaN(id)) packageIds.push(id);
@@ -309,7 +331,7 @@ export class CheckOutService {
           : orderCreatedRaw != null && String(orderCreatedRaw).trim() !== ''
             ? String(orderCreatedRaw)
             : '';
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.linesFromMap(Number(r.registration_id), linesMap);
       items.push(
         ...entries.map((e) => {
           const packageId = Number(e.package_id);
@@ -426,6 +448,41 @@ export class CheckOutService {
   }
 
   /**
+   * ค้นหารายการคืนปลาในกิจกรรม (รหัสปลา / เลขใบสมัคร / หมายเลขคำสั่งซื้อ)
+   */
+  async lookupForCheckOut(
+    activityId: number,
+    rawQuery: string,
+  ): Promise<{
+    activity: { id: number; title: string };
+    items: CheckoutItemRow[];
+  }> {
+    const q = (rawQuery || '').trim();
+    if (!q) {
+      throw new BadRequestException('กรุณาระบุคำค้นหา');
+    }
+
+    const result = await this.getActivityItems(activityId, {
+      search: q,
+      status: 'all',
+      page: 1,
+      limit: 50,
+    });
+
+    if (!result.activity) {
+      throw new NotFoundException('ไม่พบกิจกรรม');
+    }
+    if (!result.items.length) {
+      throw new NotFoundException('ไม่พบรายการที่ค้นหาในกิจกรรมนี้');
+    }
+
+    return {
+      activity: result.activity,
+      items: result.items,
+    };
+  }
+
+  /**
    * รายการ entry จากใบสมัครที่ชำระเงินแล้วของงานนี้ (ไม่ต้อง check-in)
    * ใช้เลือกรหัสปลาในแดชบอร์ดสรุปผล — ดึงชื่อผู้สมัคร / farm / แพ็กเกจตามแถวจริง
    */
@@ -451,15 +508,18 @@ export class CheckOutService {
         'reg.registration_no AS registration_no',
         'reg.applicant_name AS applicant_name',
         'reg.farm_name AS farm_name',
-        'reg.entries_json AS entries_json',
       ])
       .orderBy('ord.created_at', 'ASC')
       .addOrderBy('reg.id', 'ASC')
       .getRawMany();
 
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      rows.map((r) => Number(r.registration_id)),
+    );
+
     const packageIds: number[] = [];
     for (const r of rows) {
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.linesFromMap(Number(r.registration_id), linesMap);
       for (const e of entries) {
         const id = Number(e.package_id);
         if (!Number.isNaN(id)) packageIds.push(id);
@@ -475,7 +535,7 @@ export class CheckOutService {
       const applicant = String(r.applicant_name ?? '').trim();
       const farmRaw = r.farm_name != null ? String(r.farm_name).trim() : '';
       const farm = farmRaw !== '' ? farmRaw : null;
-      const entries = this.parseEntries(String(r.entries_json ?? '[]'));
+      const entries = this.linesFromMap(Number(r.registration_id), linesMap);
       for (const e of entries) {
         const packageId = Number(e.package_id);
         if (Number.isNaN(packageId)) continue;
@@ -541,8 +601,6 @@ export class CheckOutService {
     const targetIndex = (params.entry_index || '').trim();
     if (!targetIndex) throw new BadRequestException('กรุณาระบุ entry_index');
 
-    const entries = this.parseEntries(registration.entries_json);
-    let touched = false;
     const nowIso = new Date().toISOString();
     const actorName = (params.actor_name || '').trim() || null;
     const actorId =
@@ -555,13 +613,10 @@ export class CheckOutService {
         ? String(params.checkout_remark).trim()
         : '';
 
-    const next = entries.map((e) => {
-      const idx = e.index != null ? String(e.index).trim() : '';
-      if (idx !== targetIndex) return e;
-      touched = true;
+    await this.entryService.updateEntry(registration, targetIndex, (line) => {
       if (params.checked_out) {
         return {
-          ...e,
+          ...line,
           checked_out_at: nowIso,
           checked_out_by_user_id: actorId,
           checked_out_by_name: actorName,
@@ -569,19 +624,13 @@ export class CheckOutService {
         };
       }
       return {
-        ...e,
+        ...line,
         checked_out_at: null,
         checked_out_by_user_id: null,
         checked_out_by_name: null,
         checkout_remark: null,
       };
     });
-
-    if (!touched)
-      throw new NotFoundException('ไม่พบ item ตาม entry_index ที่ระบุ');
-
-    registration.entries_json = JSON.stringify(next);
-    await this.registrationRepository.save(registration);
     await this.recordCheckoutAudit({
       registration,
       entry_index: targetIndex,

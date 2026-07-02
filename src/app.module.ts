@@ -24,6 +24,7 @@ import { ReportModule } from './report/report.module';
 import { AccessLogModule } from './access-log/access-log.module';
 import { LoginLogModule } from './login-log/login-log.module';
 import { UserActionLogModule } from './user-action-log/user-action-log.module';
+import { ActivityRegistrationModule } from './activity-registration/activity-registration.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -49,6 +50,7 @@ import { getDatabaseConfig } from './config/database.config';
     AccessLogModule,
     LoginLogModule,
     UserActionLogModule,
+    ActivityRegistrationModule,
     OrderModule,
     SponsorModule,
     ContactModule,

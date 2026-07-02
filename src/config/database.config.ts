@@ -10,6 +10,9 @@ import { ActivityPackagePrice } from '../entities/activity-package-price.entity'
 import { Tag } from '../entities/tag.entity';
 import { ActivityTag } from '../entities/activity-tag.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
+import { ActivityClassChangeRequest } from '../entities/activity-class-change-request.entity';
+import { ActivityClassChangeLog } from '../entities/activity-class-change-log.entity';
+import { ActivityRegistrationEntry } from '../entities/activity-registration-entry.entity';
 import { ActivityFavorite } from '../entities/activity-favorite.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorRegistration } from '../entities/sponsor.entity';
@@ -48,6 +51,9 @@ export const getDatabaseConfig = (
     Tag,
     ActivityTag,
     ActivityRegistration,
+    ActivityClassChangeRequest,
+    ActivityClassChangeLog,
+    ActivityRegistrationEntry,
     ActivityFavorite,
     ActivitySponsorPackage,
     SponsorRegistration,

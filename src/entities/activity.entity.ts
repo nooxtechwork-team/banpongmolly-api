@@ -119,6 +119,14 @@ export class Activity {
   @Column({ type: 'int', default: 200 })
   check_in_geofence_radius_m: number;
 
+  /** เวลาเปิดเช็คอิน (null = ไม่มีกำหนด เริ่มเช็คอินได้ตลอด) */
+  @Column({ type: 'datetime', nullable: true })
+  check_in_open_at: Date | null;
+
+  /** เวลาปิดเช็คอิน (null = ไม่มีกำหนด เช็คอินได้จนจบงาน) */
+  @Column({ type: 'datetime', nullable: true })
+  check_in_close_at: Date | null;
+
   /** เปิดรับชำระเงินสดหน้างาน */
   @Column({ type: 'boolean', default: false })
   allow_onsite_cash: boolean;

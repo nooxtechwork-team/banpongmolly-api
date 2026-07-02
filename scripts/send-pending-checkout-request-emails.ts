@@ -1,7 +1,7 @@
 /**
  * กวาดส่งอีเมลแจ้งเจ้าหน้าที่เมื่อผู้สมัครกดขอแจ้งเตือน checkout (คืนปลา)
  * อ่านอีเมลปลายทางจาก payment_configs.checkout_request_notify_email (หลายที่อยู่คั่นด้วย comma / ; / ขึ้นบรรทัด)
- * บันทึกเวลาส่งใน entries_json[].checkout_request_email_sent_at
+ * บันทึกเวลาส่งใน activity_registration_entries.checkout_request_email_sent_at
  *
  * รันด้วย cron เช่น ทุก 1 นาที — ดูตัวอย่างใน api/README.md
  *

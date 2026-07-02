@@ -26,6 +26,7 @@ import { CheckOutController } from './check-out.controller';
 import { PaymentConfigModule } from '../payment-config/payment-config.module';
 import { OnsiteAdminController } from './onsite-admin.controller';
 import { ActivityModule } from '../activity/activity.module';
+import { ActivityRegistrationModule } from '../activity-registration/activity-registration.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { ActivityModule } from '../activity/activity.module';
     AuthModule,
     PaymentConfigModule,
     forwardRef(() => ActivityModule),
+    forwardRef(() => ActivityRegistrationModule),
   ],
   providers: [
     OrderService,

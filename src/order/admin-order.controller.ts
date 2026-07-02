@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -11,11 +12,16 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { OrderService } from './order.service';
 import { User } from '../entities/user.entity';
+import { ActivityRegistrationService } from '../activity-registration/activity-registration.service';
+import { ChangeRegistrationClassDto } from '../activity-registration/dto/change-registration-class.dto';
 
 @Controller('admin/orders')
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminOrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly activityRegistrationService: ActivityRegistrationService,
+  ) {}
 
   @Get('by-order-no/:orderNo')
   async getOrderDetailByOrderNo(
@@ -25,6 +31,19 @@ export class AdminOrderController {
     return this.orderService.findMyOrderDetail(req.user, orderNo, null, {
       entryCodePolicy: 'always',
     });
+  }
+
+  @Post('by-order-no/:orderNo/change-class')
+  async changeClassByOrderNo(
+    @Request() req: { user: User },
+    @Param('orderNo') orderNo: string,
+    @Body() dto: ChangeRegistrationClassDto,
+  ) {
+    return this.activityRegistrationService.changeClassByOrderNo(
+      orderNo,
+      dto,
+      req.user.id,
+    );
   }
 
   /**
