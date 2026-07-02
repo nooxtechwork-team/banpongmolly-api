@@ -184,7 +184,7 @@ export class ActivityRegistrationService {
 
     if (existing) {
       existing.entry_id = entryEntity.id;
-      existing.entry_index = entryEntity.entry_index;
+      existing.entry_index = entryEntity.entry_index ?? entryIndex;
       existing.old_package_id = oldPackageId;
       existing.new_package_id = leaf.id;
       existing.reason = dto.reason.trim();
@@ -196,7 +196,7 @@ export class ActivityRegistrationService {
         this.classChangeRequestRepository.create({
           registration_id: registration.id,
           entry_id: entryEntity.id,
-          entry_index: entryEntity.entry_index,
+          entry_index: entryEntity.entry_index ?? entryIndex,
           old_package_id: oldPackageId,
           new_package_id: leaf.id,
           reason: dto.reason.trim(),
@@ -661,7 +661,7 @@ export class ActivityRegistrationService {
         logRepo.create({
           registration_id: registration.id,
           entry_id: entryEntity.id,
-          entry_index: entryEntity.entry_index,
+          entry_index: entryEntity.entry_index ?? entryIndex,
           old_package_id: oldPackageId,
           new_package_id: leaf.id,
           reason: dto.reason.trim(),
@@ -673,7 +673,7 @@ export class ActivityRegistrationService {
 
       if (pending) {
         pending.entry_id = entryEntity.id;
-        pending.entry_index = entryEntity.entry_index;
+        pending.entry_index = entryEntity.entry_index ?? entryIndex;
         pending.status = ActivityClassChangeRequestStatus.APPROVED;
         pending.resolved_at = changedAt;
         pending.resolved_by_user_id = adminUserId;

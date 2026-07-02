@@ -176,11 +176,16 @@ export class OrderService {
     });
     const saved = await this.orderRepository.save(entity);
     if (
-      markPaid &&
-      saved.type === OrderType.ACTIVITY_REGISTRATION &&
-      saved.user_id != null
+      saved.status === OrderStatus.PAID &&
+      saved.type === OrderType.ACTIVITY_REGISTRATION
     ) {
-      this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+      await this.entryService.assignActivityWideEntryIndicesForRegistration(
+        saved.refer_id,
+      );
+      if (saved.user_id != null) {
+        this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+      }
+      return saved;
     }
     return saved;
   }
@@ -494,14 +499,12 @@ export class OrderService {
           const idxStr = e.index?.trim() ?? '';
           const slugPath = slugPaths.get(packageId);
           const canExposeEntryCode =
-            entryCodePolicy === 'always' ||
-            (entryCodePolicy === 'checked_in' && isCheckedIn);
+            idxStr !== '' &&
+            (entryCodePolicy === 'always' ||
+              (entryCodePolicy === 'checked_in' && isCheckedIn));
           const entry_code = canExposeEntryCode
             ? e.entry_code?.trim() ||
-              buildActivityRegistrationEntryCode(
-                slugPath ?? null,
-                idxStr || '0000',
-              )
+              buildActivityRegistrationEntryCode(slugPath ?? null, idxStr)
             : null;
 
           const optIso = (v: string | null | undefined): string | null =>
@@ -802,12 +805,10 @@ export class OrderService {
           `ค่าสมัครแพ็กเกจ #${packageId}`;
         const idxStr = e.index?.trim() ?? '';
         const slugPath = slugPaths.get(packageId);
-        const entry_code =
-          e.entry_code?.trim() ||
-          buildActivityRegistrationEntryCode(
-            slugPath ?? null,
-            idxStr || '0000',
-          );
+        const entry_code = idxStr
+          ? e.entry_code?.trim() ||
+            buildActivityRegistrationEntryCode(slugPath ?? null, idxStr)
+          : null;
         return {
           ...(idxStr ? { index: idxStr } : {}),
           ...(entry_code ? { entry_code } : {}),
@@ -1021,6 +1022,9 @@ export class OrderService {
     order.status = status;
     order.cancel_reason =
       status === OrderStatus.CANCELLED && cancelReason ? cancelReason : null;
+    if (status === OrderStatus.PAID) {
+      order.paid_at = order.paid_at ?? new Date();
+    }
     if (status !== OrderStatus.PAID) {
       order.receipt_email_sent_at = null;
     }
@@ -1040,10 +1044,14 @@ export class OrderService {
 
     if (
       status === OrderStatus.PAID &&
-      saved.type === OrderType.ACTIVITY_REGISTRATION &&
-      saved.user_id != null
+      saved.type === OrderType.ACTIVITY_REGISTRATION
     ) {
-      this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+      await this.entryService.assignActivityWideEntryIndicesForRegistration(
+        saved.refer_id,
+      );
+      if (saved.user_id != null) {
+        this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);
+      }
     }
 
     // ใบเสร็จทางเมลให้สคริปต์ cron กวาด (หรือ POST .../send-receipt เพื่อคิวซ้ำ)
@@ -1089,6 +1097,10 @@ export class OrderService {
     }
 
     const saved = await this.orderRepository.save(order);
+
+    await this.entryService.assignActivityWideEntryIndicesForRegistration(
+      saved.refer_id,
+    );
 
     if (saved.user_id != null) {
       this.checkInGateway.notifyUserPendingTicketBadgeRefresh(saved.user_id);

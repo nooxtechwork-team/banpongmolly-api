@@ -21,8 +21,8 @@ export class ActivityRegistrationEntry {
   @Column({ type: 'int' })
   registration_id: number;
 
-  @Column({ type: 'varchar', length: 32 })
-  entry_index: string;
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  entry_index: string | null;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
   entry_code: string | null;

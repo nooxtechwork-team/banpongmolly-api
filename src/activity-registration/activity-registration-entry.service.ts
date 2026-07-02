@@ -1,12 +1,18 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivityRegistrationEntry } from '../entities/activity-registration-entry.entity';
+import { Activity } from '../entities/activity.entity';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
+import { ActivityPackageService } from '../activity-package/activity-package.service';
+import {
+  allocateFormattedActivityEntryIndices,
+} from '../common/utils/activity-entry-index.util';
+import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 
 export interface ActivityRegistrationEntryLine {
-  index: string;
+  index: string | null;
   entry_code?: string | null;
   package_id: number;
   quantity: number;
@@ -26,6 +32,9 @@ export class ActivityRegistrationEntryService {
   constructor(
     @InjectRepository(ActivityRegistrationEntry)
     private readonly entryRepository: Repository<ActivityRegistrationEntry>,
+    @InjectRepository(Activity)
+    private readonly activityRepository: Repository<Activity>,
+    private readonly activityPackageService: ActivityPackageService,
   ) {}
 
   entityToLine(entity: ActivityRegistrationEntry): ActivityRegistrationEntryLine {
@@ -53,7 +62,7 @@ export class ActivityRegistrationEntryService {
   ): Promise<ActivityRegistrationEntryLine[]> {
     const rows = await this.entryRepository.find({
       where: { registration_id: registrationId },
-      order: { entry_index: 'ASC' },
+      order: { id: 'ASC' },
     });
     return rows.map((row) => this.entityToLine(row));
   }
@@ -71,7 +80,7 @@ export class ActivityRegistrationEntryService {
 
     const rows = await this.entryRepository.find({
       where: { registration_id: In(unique) },
-      order: { registration_id: 'ASC', entry_index: 'ASC' },
+      order: { registration_id: 'ASC', id: 'ASC' },
     });
     for (const row of rows) {
       map.get(row.registration_id)!.push(this.entityToLine(row));
@@ -158,6 +167,9 @@ export class ActivityRegistrationEntryService {
     return this.findLinesByRegistrationId(registration.id);
   }
 
+  /**
+   * นับเฉพาะเลขลำดับของรายการที่ชำระเงินแล้ว — ไม่นับคำขอที่ยังรออนุมัติ
+   */
   async getMaxEntryIndexForActivity(activityId: number): Promise<number> {
     const row = await this.entryRepository
       .createQueryBuilder('ent')
@@ -167,10 +179,77 @@ export class ActivityRegistrationEntryService {
         'reg.id = ent.registration_id AND reg.activity_id = :activityId',
         { activityId },
       )
+      .innerJoin(
+        Order,
+        'o',
+        'o.refer_id = reg.id AND o.type = :otype AND o.status = :paid',
+        { otype: OrderType.ACTIVITY_REGISTRATION, paid: OrderStatus.PAID },
+      )
+      .where('ent.entry_index IS NOT NULL')
+      .andWhere("ent.entry_index <> ''")
       .select('MAX(CAST(ent.entry_index AS UNSIGNED))', 'max_index')
       .getRawOne<{ max_index: string | null }>();
 
     return Number(row?.max_index ?? 0);
+  }
+
+  /**
+   * กำหนดเลขลำดับกิจกรรมและ entry_code เมื่ออนุมัติการชำระเงินแล้ว (idempotent)
+   */
+  async assignActivityWideEntryIndicesForRegistration(
+    registrationId: number,
+  ): Promise<void> {
+    await this.entryRepository.manager.transaction(async (manager) => {
+      const entryRepo = manager.getRepository(ActivityRegistrationEntry);
+      const regRepo = manager.getRepository(ActivityRegistration);
+      const activityRepo = manager.getRepository(Activity);
+
+      const registration = await regRepo.findOne({
+        where: { id: registrationId },
+      });
+      if (!registration) return;
+
+      const entries = await entryRepo.find({
+        where: { registration_id: registrationId },
+        order: { id: 'ASC' },
+      });
+      const pending = entries.filter((row) => !String(row.entry_index ?? '').trim());
+      if (!pending.length) return;
+
+      await activityRepo.findOne({
+        where: { id: registration.activity_id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      const maxIndex = await this.getMaxEntryIndexForActivityInTransaction(
+        manager,
+        registration.activity_id,
+      );
+      const formattedIndices = allocateFormattedActivityEntryIndices(
+        maxIndex + 1,
+        pending.length,
+      );
+
+      const packageIds = [
+        ...new Set(pending.map((row) => Number(row.package_id))),
+      ];
+      const slugPaths =
+        await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(
+          packageIds,
+        );
+
+      for (let i = 0; i < pending.length; i++) {
+        const entry = pending[i]!;
+        const idxStr = formattedIndices[i]!;
+        entry.entry_index = idxStr;
+        entry.entry_code = buildActivityRegistrationEntryCode(
+          slugPaths.get(Number(entry.package_id)) ?? null,
+          idxStr,
+        );
+      }
+
+      await entryRepo.save(pending);
+    });
   }
 
   async findPendingCheckoutEmailJobs(
@@ -186,6 +265,8 @@ export class ActivityRegistrationEntryService {
         { otype: OrderType.ACTIVITY_REGISTRATION, paid: OrderStatus.PAID },
       )
       .where('reg.checked_in_at IS NOT NULL')
+      .andWhere('ent.entry_index IS NOT NULL')
+      .andWhere("ent.entry_index <> ''")
       .andWhere('ent.checkout_requested_at IS NOT NULL')
       .andWhere('ent.checkout_request_email_sent_at IS NULL')
       .andWhere('ent.checked_out_at IS NULL')
@@ -203,13 +284,41 @@ export class ActivityRegistrationEntryService {
     }));
   }
 
+  private async getMaxEntryIndexForActivityInTransaction(
+    manager: EntityManager,
+    activityId: number,
+  ): Promise<number> {
+    const row = await manager
+      .getRepository(ActivityRegistrationEntry)
+      .createQueryBuilder('ent')
+      .innerJoin(
+        ActivityRegistration,
+        'reg',
+        'reg.id = ent.registration_id AND reg.activity_id = :activityId',
+        { activityId },
+      )
+      .innerJoin(
+        Order,
+        'o',
+        'o.refer_id = reg.id AND o.type = :otype AND o.status = :paid',
+        { otype: OrderType.ACTIVITY_REGISTRATION, paid: OrderStatus.PAID },
+      )
+      .where('ent.entry_index IS NOT NULL')
+      .andWhere("ent.entry_index <> ''")
+      .select('MAX(CAST(ent.entry_index AS UNSIGNED))', 'max_index')
+      .getRawOne<{ max_index: string | null }>();
+
+    return Number(row?.max_index ?? 0);
+  }
+
   private lineToEntity(
     registrationId: number,
     line: ActivityRegistrationEntryLine,
   ): Partial<ActivityRegistrationEntry> {
+    const index = line.index?.trim() || null;
     return {
       registration_id: registrationId,
-      entry_index: line.index,
+      entry_index: index,
       entry_code: line.entry_code ?? null,
       package_id: line.package_id,
       quantity: line.quantity,

@@ -168,7 +168,7 @@ export class ReportService {
     lines: ActivityRegistrationEntryLine[],
   ): EntryJsonRow[] {
     return lines.map((line) => ({
-      index: line.index,
+      index: line.index ?? undefined,
       entry_code: line.entry_code ?? undefined,
       package_id: line.package_id,
       quantity: line.quantity,
@@ -383,12 +383,13 @@ export class ReportService {
         e.index != null && String(e.index).trim() !== ''
           ? String(e.index).trim()
           : '';
+      if (!idxStr) continue;
       const slugPath = slugPathMap.get(packageId) ?? null;
       const path = namePathMap.get(packageId) ?? '';
       const labels = this.splitPackageLabels(path);
       const entryCode = buildActivityRegistrationEntryCode(
         slugPath,
-        idxStr || '0000',
+        idxStr,
       );
       for (let i = 0; i < qty; i++) {
         rowNo += 1;
@@ -999,7 +1000,8 @@ export class ReportService {
           const idxStr =
             e.index != null && String(e.index).trim() !== ''
               ? String(e.index).trim()
-              : '0000';
+              : '';
+          if (!idxStr) continue;
           items.push({
             registration_id: Number(r.registration_id),
             registration_no: String(r.registration_no ?? '').trim() || `AR-${r.registration_id}`,

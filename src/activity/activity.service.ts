@@ -25,9 +25,6 @@ import { ActivityPackageService } from '../activity-package/activity-package.ser
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import {
-  allocateFormattedActivityEntryIndices,
-} from '../common/utils/activity-entry-index.util';
-import {
   ActivityLiveEmbed,
   parseActivityLiveEmbedsJson,
   serializeActivityLiveEmbeds,
@@ -36,7 +33,6 @@ import {
   parseCompetitionDashboardJson,
   type CompetitionDashboardPayload,
 } from '../common/utils/competition-dashboard.util';
-import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 import {
   getOnsiteCashStatus,
   type OnsiteCashStatus,
@@ -211,6 +207,25 @@ export class ActivityService {
     return this.entryService.getMaxEntryIndexForActivity(activityId);
   }
 
+  private buildPendingEntryLines(
+    items: { package_id: number; quantity: number; unit_price: number }[],
+  ): ActivityRegistrationEntryLine[] {
+    const storedLines: ActivityRegistrationEntryLine[] = [];
+    for (const item of items) {
+      for (let k = 0; k < item.quantity; k++) {
+        storedLines.push({
+          index: null,
+          entry_code: null,
+          package_id: item.package_id,
+          quantity: 1,
+          unit_price: item.unit_price,
+          line_total: item.unit_price,
+        });
+      }
+    }
+    return storedLines;
+  }
+
   private assertRegistrationAllowed(
     activity: Activity,
     now: Date,
@@ -317,40 +332,7 @@ export class ActivityService {
       payload.entries,
     );
 
-    const lineCount = items.reduce((sum, i) => sum + i.quantity, 0);
-    const startIndex =
-      (await this.getMaxEntryIndexForActivity(activity.id)) + 1;
-    const formattedIndices = allocateFormattedActivityEntryIndices(
-      startIndex,
-      lineCount,
-    );
-
-    const leafIds = [...new Set(items.map((i) => i.package_id))];
-    const slugPaths =
-      await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(
-        leafIds,
-      );
-
-    let idxPos = 0;
-    const storedLines: ActivityRegistrationEntryLine[] = [];
-    for (const i of items) {
-      for (let k = 0; k < i.quantity; k++) {
-        const idxStr = formattedIndices[idxPos++]!;
-        const slugPath = slugPaths.get(i.package_id);
-        const entry_code = buildActivityRegistrationEntryCode(
-          slugPath ?? null,
-          idxStr,
-        );
-        storedLines.push({
-          index: idxStr,
-          entry_code,
-          package_id: i.package_id,
-          quantity: 1,
-          unit_price: i.unit_price,
-          line_total: i.unit_price,
-        });
-      }
-    }
+    const storedLines = this.buildPendingEntryLines(items);
 
     const entity = this.registrationRepository.create({
       registration_no: generateReferenceNo('AR'),
@@ -474,40 +456,7 @@ export class ActivityService {
       payload.entries,
     );
 
-    const lineCount = items.reduce((sum, i) => sum + i.quantity, 0);
-    const startIndex =
-      (await this.getMaxEntryIndexForActivity(activity.id)) + 1;
-    const formattedIndices = allocateFormattedActivityEntryIndices(
-      startIndex,
-      lineCount,
-    );
-
-    const leafIds = [...new Set(items.map((i) => i.package_id))];
-    const slugPaths =
-      await this.activityPackageService.findSlugPathFromLayer2ByLeafIds(
-        leafIds,
-      );
-
-    let idxPos = 0;
-    const storedLines: ActivityRegistrationEntryLine[] = [];
-    for (const i of items) {
-      for (let k = 0; k < i.quantity; k++) {
-        const idxStr = formattedIndices[idxPos++]!;
-        const slugPath = slugPaths.get(i.package_id);
-        const entry_code = buildActivityRegistrationEntryCode(
-          slugPath ?? null,
-          idxStr,
-        );
-        storedLines.push({
-          index: idxStr,
-          entry_code,
-          package_id: i.package_id,
-          quantity: 1,
-          unit_price: i.unit_price,
-          line_total: i.unit_price,
-        });
-      }
-    }
+    const storedLines = this.buildPendingEntryLines(items);
 
     const entity = this.registrationRepository.create({
       registration_no: generateReferenceNo('AR'),

@@ -101,7 +101,7 @@ export class CheckOutService {
   ): EntryJsonRow[] {
     const fromTable = linesMap.get(registrationId) ?? [];
     return fromTable.map((line) => ({
-      index: line.index,
+      index: line.index ?? undefined,
       entry_code: line.entry_code ?? undefined,
       package_id: line.package_id,
       quantity: line.quantity,
@@ -333,15 +333,16 @@ export class CheckOutService {
             : '';
       const entries = this.linesFromMap(Number(r.registration_id), linesMap);
       items.push(
-        ...entries.map((e) => {
+        ...entries
+          .filter(
+            (e) => e.index != null && String(e.index).trim() !== '',
+          )
+          .map((e) => {
           const packageId = Number(e.package_id);
-          const idx =
-            e.index != null && String(e.index).trim() !== ''
-              ? String(e.index).trim()
-              : '-';
+          const idx = String(e.index).trim();
           const code = buildActivityRegistrationEntryCode(
             packageSlugPathMap.get(packageId) ?? null,
-            idx && idx !== '-' ? idx : '0000',
+            idx,
           );
           return {
             registration_id: registrationId,
@@ -542,7 +543,8 @@ export class CheckOutService {
         const idx =
           e.index != null && String(e.index).trim() !== ''
             ? String(e.index).trim()
-            : '-';
+            : '';
+        if (!idx) continue;
         const stored =
           e.entry_code != null && String(e.entry_code).trim() !== ''
             ? String(e.entry_code).trim()
@@ -551,7 +553,7 @@ export class CheckOutService {
           stored ??
           buildActivityRegistrationEntryCode(
             packageSlugPathMap.get(packageId) ?? null,
-            idx && idx !== '-' ? idx : '0000',
+            idx,
           );
         const pkgLabel =
           packagePathMap.get(packageId) ||
