@@ -148,4 +148,20 @@ export class CreateActivityDto {
   @Type(() => Number)
   @IsNumber()
   check_in_geofence_radius_m?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_onsite_cash?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  onsite_cash_open_at?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  onsite_cash_close_at?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_onsite_registration_after_deadline?: boolean;
 }

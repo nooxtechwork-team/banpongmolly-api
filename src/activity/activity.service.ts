@@ -901,6 +901,15 @@ export class ActivityService {
       location_longitude: dto.location_longitude ?? null,
       check_in_geofence_enabled: dto.check_in_geofence_enabled ?? false,
       check_in_geofence_radius_m: dto.check_in_geofence_radius_m ?? 200,
+      allow_onsite_cash: dto.allow_onsite_cash ?? false,
+      onsite_cash_open_at: dto.onsite_cash_open_at
+        ? new Date(dto.onsite_cash_open_at)
+        : null,
+      onsite_cash_close_at: dto.onsite_cash_close_at
+        ? new Date(dto.onsite_cash_close_at)
+        : null,
+      allow_onsite_registration_after_deadline:
+        dto.allow_onsite_registration_after_deadline ?? true,
       contact_info: dto.contact_info ?? null,
       province_id: dto.province_id ?? null,
       activity_package_id: dto.activity_package_id ?? null,
