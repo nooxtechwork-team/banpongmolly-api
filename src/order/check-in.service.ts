@@ -10,7 +10,10 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity, ActivityStatus } from '../entities/activity.entity';
 import { User } from '../entities/user.entity';
 import { CheckInGateway } from './check-in.gateway';
-import { ActivityRegistrationEntryService, type ActivityRegistrationEntryLine } from '../activity-registration/activity-registration-entry.service';
+import {
+  ActivityRegistrationEntryService,
+  type ActivityRegistrationEntryLine,
+} from '../activity-registration/activity-registration-entry.service';
 
 export interface CheckInLookupResult {
   registration_id: number;
@@ -64,6 +67,10 @@ export interface MyCheckInActivityItem {
   registration_id: number;
   registration_no: string;
   order_no: string | null;
+  /** จำนวนใบสมัคร (ออเดอร์) ที่ชำระแล้วของกิจกรรมนี้ */
+  registration_count: number;
+  /** จำนวนใบที่ยังไม่เช็คอิน */
+  pending_count: number;
   checked_in_at: string | null;
   can_check_in: boolean;
 }
@@ -76,19 +83,46 @@ export interface CheckInSelfPreviewEntry {
   entry_code?: string | null;
 }
 
-export interface CheckInSelfPreview {
-  activity_id: number;
-  activity_title: string;
-  activity_location: string;
+export interface CheckInSelfPreviewRegistration {
   registration_id: number;
   registration_no: string;
   order_no: string | null;
-  applicant_name: string;
-  phone: string;
   total_amount: number;
   already_checked_in: boolean;
   checked_in_at: string | null;
   entries: CheckInSelfPreviewEntry[];
+}
+
+export interface CheckInSelfPreview {
+  activity_id: number;
+  activity_title: string;
+  activity_location: string;
+  applicant_name: string;
+  phone: string;
+  /** ยอดรวมทุกใบสมัคร */
+  total_amount: number;
+  /** จำนวนใบสมัครทั้งหมดของกิจกรรมนี้ (ที่ชำระแล้ว) */
+  registration_count: number;
+  /** จำนวนใบที่ยังไม่เช็คอิน */
+  pending_count: number;
+  /** true เมื่อทุกใบเช็คอินแล้ว */
+  already_checked_in: boolean;
+  /** เวลาเช็คอินล่าสุด (ถ้ามี) */
+  checked_in_at: string | null;
+  /** ใบสมัครแต่ละใบพร้อมรายการ */
+  registrations: CheckInSelfPreviewRegistration[];
+  /** รายการรวมทุกใบ (สรุป) */
+  entries: CheckInSelfPreviewEntry[];
+}
+
+export interface CheckInSelfConfirmResult {
+  activity_title: string;
+  /** จำนวนใบที่เช็คอินสำเร็จในครั้งนี้ */
+  checked_in_count: number;
+  /** จำนวนใบที่เช็คอินไปแล้วก่อนหน้า */
+  already_count: number;
+  /** จำนวนใบสมัครทั้งหมดของกิจกรรมนี้ */
+  total_count: number;
 }
 
 export const ACTIVITY_CHECK_IN_PREFIX = 'BM:CHECKIN:ACTIVITY:';
@@ -562,42 +596,78 @@ export class CheckInService {
       .addOrderBy('a.title', 'ASC')
       .getRawMany();
 
-    return (raws || []).map((row: any) => {
+    const now = new Date();
+
+    interface RegRow {
+      registration_id: number;
+      registration_no: string;
+      order_no: string | null;
+      checked_in_at: string | null;
+    }
+    interface ActivityGroup {
+      base: MyCheckInActivityItem;
+      withinWindow: boolean;
+      regs: RegRow[];
+    }
+
+    const byActivity = new Map<number, ActivityGroup>();
+
+    for (const row of raws || []) {
+      const activityId = Number(row.activity_id);
       const checkedInAt =
         row.checked_in_at instanceof Date
           ? row.checked_in_at.toISOString()
           : row.checked_in_at
             ? String(row.checked_in_at)
             : null;
-      const now = new Date();
-      const openAt =
-        row.check_in_open_at instanceof Date
-          ? row.check_in_open_at
-          : row.check_in_open_at
-            ? new Date(String(row.check_in_open_at))
-            : null;
-      const closeAt =
-        row.check_in_close_at instanceof Date
-          ? row.check_in_close_at
-          : row.check_in_close_at
-            ? new Date(String(row.check_in_close_at))
-            : null;
-      const withinWindow =
-        (!openAt || now.getTime() >= openAt.getTime()) &&
-        (!closeAt || now.getTime() <= closeAt.getTime());
-      return {
-        activity_id: Number(row.activity_id),
-        title: row.title ?? '',
-        slug: row.slug ?? '',
-        start_date:
-          row.start_date instanceof Date
-            ? row.start_date.toISOString().slice(0, 10)
-            : String(row.start_date ?? ''),
-        end_date:
-          row.end_date instanceof Date
-            ? row.end_date.toISOString().slice(0, 10)
-            : String(row.end_date ?? ''),
-        location_name: row.location_name ?? '',
+
+      let group = byActivity.get(activityId);
+      if (!group) {
+        const openAt =
+          row.check_in_open_at instanceof Date
+            ? row.check_in_open_at
+            : row.check_in_open_at
+              ? new Date(String(row.check_in_open_at))
+              : null;
+        const closeAt =
+          row.check_in_close_at instanceof Date
+            ? row.check_in_close_at
+            : row.check_in_close_at
+              ? new Date(String(row.check_in_close_at))
+              : null;
+        const withinWindow =
+          (!openAt || now.getTime() >= openAt.getTime()) &&
+          (!closeAt || now.getTime() <= closeAt.getTime());
+
+        group = {
+          withinWindow,
+          regs: [],
+          base: {
+            activity_id: activityId,
+            title: row.title ?? '',
+            slug: row.slug ?? '',
+            start_date:
+              row.start_date instanceof Date
+                ? row.start_date.toISOString().slice(0, 10)
+                : String(row.start_date ?? ''),
+            end_date:
+              row.end_date instanceof Date
+                ? row.end_date.toISOString().slice(0, 10)
+                : String(row.end_date ?? ''),
+            location_name: row.location_name ?? '',
+            registration_id: 0,
+            registration_no: '',
+            order_no: null,
+            registration_count: 0,
+            pending_count: 0,
+            checked_in_at: null,
+            can_check_in: false,
+          },
+        };
+        byActivity.set(activityId, group);
+      }
+
+      group.regs.push({
         registration_id: Number(row.registration_id),
         registration_no: row.registration_no ?? '',
         order_no:
@@ -605,9 +675,66 @@ export class CheckInService {
             ? String(row.order_no).trim()
             : null,
         checked_in_at: checkedInAt,
-        can_check_in: !checkedInAt && withinWindow,
+      });
+    }
+
+    return [...byActivity.values()].map((group) => {
+      const pending = group.regs.filter((r) => !r.checked_in_at);
+      // ใบตัวแทน: ใช้ใบที่ยังไม่เช็คอินใบแรก (ถ้ามี) ไม่งั้นใบแรก
+      const representative = pending[0] ?? group.regs[0]!;
+      const latestCheckedIn =
+        group.regs
+          .map((r) => r.checked_in_at)
+          .filter((v): v is string => !!v)
+          .sort()
+          .at(-1) ?? null;
+
+      return {
+        ...group.base,
+        registration_id: representative.registration_id,
+        registration_no: representative.registration_no,
+        order_no: representative.order_no,
+        registration_count: group.regs.length,
+        pending_count: pending.length,
+        checked_in_at: pending.length ? null : latestCheckedIn,
+        can_check_in: pending.length > 0 && group.withinWindow,
       };
     });
+  }
+
+  /**
+   * ใบสมัครทั้งหมดของผู้ใช้ที่ชำระเงินแล้วในกิจกรรมนี้ (เรียงตาม id — เลขปลาน้อยไปมาก)
+   */
+  private async findPaidRegistrationRowsForActivity(
+    userId: number,
+    activityId: number,
+  ): Promise<{ registration_id: number; order_no: string | null }[]> {
+    const raws = await this.orderRepository
+      .createQueryBuilder('o')
+      .innerJoin(ActivityRegistration, 'reg', 'reg.id = o.refer_id')
+      .select(['reg.id AS registration_id', 'o.order_no AS order_no'])
+      .where('o.user_id = :userId', { userId })
+      .andWhere('o.type = :type', { type: OrderType.ACTIVITY_REGISTRATION })
+      .andWhere('o.status = :status', { status: OrderStatus.PAID })
+      .andWhere('reg.activity_id = :activityId', { activityId })
+      .orderBy('reg.id', 'ASC')
+      .getRawMany();
+
+    const seen = new Set<number>();
+    const rows: { registration_id: number; order_no: string | null }[] = [];
+    for (const r of raws || []) {
+      const id = Number(r.registration_id);
+      if (!Number.isFinite(id) || seen.has(id)) continue;
+      seen.add(id);
+      rows.push({
+        registration_id: id,
+        order_no:
+          r.order_no != null && String(r.order_no).trim() !== ''
+            ? String(r.order_no).trim()
+            : null,
+      });
+    }
+    return rows;
   }
 
   async previewSelfCheckIn(
@@ -630,65 +757,73 @@ export class CheckInService {
     this.assertWithinCheckInTime(activity);
     this.assertWithinCheckInGeofence(activity, coords);
 
-    const raw = await this.orderRepository
-      .createQueryBuilder('o')
-      .innerJoin(ActivityRegistration, 'reg', 'reg.id = o.refer_id')
-      .select([
-        'reg.id AS registration_id',
-        'reg.registration_no AS registration_no',
-        'reg.applicant_name AS applicant_name',
-        'reg.phone AS phone',
-        'reg.total_amount AS total_amount',
-        'reg.checked_in_at AS checked_in_at',
-        'o.order_no AS order_no',
-      ])
-      .where('o.user_id = :userId', { userId })
-      .andWhere('o.type = :type', { type: OrderType.ACTIVITY_REGISTRATION })
-      .andWhere('o.status = :status', { status: OrderStatus.PAID })
-      .andWhere('reg.activity_id = :activityId', { activityId })
-      .getRawOne();
-
-    if (!raw?.registration_id) {
+    const regRows = await this.findPaidRegistrationRowsForActivity(
+      userId,
+      activityId,
+    );
+    if (!regRows.length) {
       throw new BadRequestException(
         'คุณยังไม่มีใบสมัครที่ชำระเงินแล้วสำหรับกิจกรรมนี้',
       );
     }
 
-    const registration = await this.registrationRepository.findOne({
-      where: { id: Number(raw.registration_id) },
-    });
-    if (!registration) {
-      throw new BadRequestException(
-        'คุณยังไม่มีใบสมัครที่ชำระเงินแล้วสำหรับกิจกรรมนี้',
-      );
-    }
+    const registrations: CheckInSelfPreviewRegistration[] = [];
+    const allEntries: CheckInSelfPreviewEntry[] = [];
+    let totalAmount = 0;
+    let pendingCount = 0;
+    let applicantName = '';
+    let phone = '';
+    let latestCheckedInAt: string | null = null;
 
-    const entryLines =
-      await this.entryService.resolveLinesForRegistration(registration);
-    const entries = this.entryLinesToPreviewEntries(entryLines);
-    const checkedInAt =
-      raw.checked_in_at instanceof Date
-        ? raw.checked_in_at.toISOString()
-        : raw.checked_in_at
-          ? String(raw.checked_in_at)
-          : null;
+    for (const row of regRows) {
+      const reg = await this.registrationRepository.findOne({
+        where: { id: row.registration_id },
+      });
+      if (!reg) continue;
+
+      const entryLines =
+        await this.entryService.resolveLinesForRegistration(reg);
+      const entries = this.entryLinesToPreviewEntries(entryLines);
+      const checkedInAt = reg.checked_in_at
+        ? reg.checked_in_at.toISOString()
+        : null;
+      const already = !!checkedInAt;
+      if (!already) pendingCount += 1;
+      if (
+        checkedInAt &&
+        (!latestCheckedInAt || checkedInAt > latestCheckedInAt)
+      ) {
+        latestCheckedInAt = checkedInAt;
+      }
+      totalAmount += Number(reg.total_amount ?? 0);
+      if (!applicantName) applicantName = reg.applicant_name ?? '';
+      if (!phone) phone = reg.phone ?? '';
+
+      registrations.push({
+        registration_id: reg.id,
+        registration_no: reg.registration_no,
+        order_no: row.order_no,
+        total_amount: Number(reg.total_amount ?? 0),
+        already_checked_in: already,
+        checked_in_at: checkedInAt,
+        entries,
+      });
+      allEntries.push(...entries);
+    }
 
     return {
       activity_id: activityId,
       activity_title: activity.title,
       activity_location: activity.location_name,
-      registration_id: Number(raw.registration_id),
-      registration_no: raw.registration_no ?? '',
-      order_no:
-        raw.order_no != null && String(raw.order_no).trim() !== ''
-          ? String(raw.order_no).trim()
-          : null,
-      applicant_name: raw.applicant_name ?? '',
-      phone: raw.phone ?? '',
-      total_amount: Number(raw.total_amount ?? 0),
-      already_checked_in: !!checkedInAt,
-      checked_in_at: checkedInAt,
-      entries,
+      applicant_name: applicantName,
+      phone,
+      total_amount: totalAmount,
+      registration_count: registrations.length,
+      pending_count: pendingCount,
+      already_checked_in: pendingCount === 0,
+      checked_in_at: latestCheckedInAt,
+      registrations,
+      entries: allEntries,
     };
   }
 
@@ -696,11 +831,7 @@ export class CheckInService {
     userId: number,
     code: string,
     coords?: CheckInGeoCoords | null,
-  ): Promise<{
-    checked_in_at: string;
-    registration_no: string;
-    activity_title: string;
-  }> {
+  ): Promise<CheckInSelfConfirmResult> {
     const activityId = parseActivityCheckInCode(code);
     if (activityId == null) {
       throw new BadRequestException('QR Code ไม่ถูกต้อง');
@@ -725,11 +856,7 @@ export class CheckInService {
     activityId: number,
     code: string,
     coords?: CheckInGeoCoords | null,
-  ): Promise<{
-    checked_in_at: string;
-    registration_no: string;
-    activity_title: string;
-  }> {
+  ): Promise<CheckInSelfConfirmResult> {
     const parsedActivityId = parseActivityCheckInCode(code);
     if (parsedActivityId == null) {
       throw new BadRequestException('QR Code ไม่ถูกต้อง');
@@ -748,26 +875,49 @@ export class CheckInService {
     this.assertWithinCheckInTime(activity);
     this.assertWithinCheckInGeofence(activity, coords);
 
-    const raw = await this.orderRepository
-      .createQueryBuilder('o')
-      .innerJoin(ActivityRegistration, 'reg', 'reg.id = o.refer_id')
-      .select(['reg.id AS registration_id'])
-      .where('o.user_id = :userId', { userId })
-      .andWhere('o.type = :type', { type: OrderType.ACTIVITY_REGISTRATION })
-      .andWhere('o.status = :status', { status: OrderStatus.PAID })
-      .andWhere('reg.activity_id = :activityId', { activityId })
-      .getRawOne();
-
-    if (!raw?.registration_id) {
+    const regRows = await this.findPaidRegistrationRowsForActivity(
+      userId,
+      activityId,
+    );
+    if (!regRows.length) {
       throw new BadRequestException(
         'คุณยังไม่มีใบสมัครที่ชำระเงินแล้วสำหรับกิจกรรมนี้',
       );
     }
 
-    const result = await this.submit(Number(raw.registration_id));
+    const now = new Date();
+    let checkedInCount = 0;
+    let alreadyCount = 0;
+
+    // เช็คอินทุกใบสมัครของกิจกรรมนี้พร้อมกัน — ข้ามใบที่เช็คอินไปแล้ว
+    for (const row of regRows) {
+      const reg = await this.registrationRepository.findOne({
+        where: { id: row.registration_id },
+      });
+      if (!reg) continue;
+      if (reg.checked_in_at) {
+        alreadyCount += 1;
+        continue;
+      }
+      reg.checked_in_at = now;
+      await this.registrationRepository.save(reg);
+      this.checkInGateway.notifyTicketCheckedIn(reg.registration_no);
+      checkedInCount += 1;
+    }
+
+    if (checkedInCount === 0) {
+      throw new BadRequestException(
+        alreadyCount > 0
+          ? 'ทุกใบสมัครของกิจกรรมนี้เช็คอินไปแล้ว'
+          : 'ไม่มีใบสมัครที่เช็คอินได้',
+      );
+    }
+
     return {
-      ...result,
       activity_title: activity.title,
+      checked_in_count: checkedInCount,
+      already_count: alreadyCount,
+      total_count: regRows.length,
     };
   }
 }
