@@ -767,6 +767,30 @@ export class CheckInService {
       );
     }
 
+    // โหลดใบสมัคร + รายการปลาให้ครบก่อน แล้ว resolve ชื่อแพ็กเกจ (ตัวลูกสุด) ครั้งเดียว
+    const loaded: {
+      row: { registration_id: number; order_no: string | null };
+      reg: ActivityRegistration;
+      entryLines: ActivityRegistrationEntryLine[];
+    }[] = [];
+    const packageIdSet = new Set<number>();
+    for (const row of regRows) {
+      const reg = await this.registrationRepository.findOne({
+        where: { id: row.registration_id },
+      });
+      if (!reg) continue;
+      const entryLines =
+        await this.entryService.resolveLinesForRegistration(reg);
+      for (const line of entryLines) {
+        packageIdSet.add(Number(line.package_id));
+      }
+      loaded.push({ row, reg, entryLines });
+    }
+
+    const packageNameById = await this.entryService.resolvePackageLeafNames([
+      ...packageIdSet,
+    ]);
+
     const registrations: CheckInSelfPreviewRegistration[] = [];
     const allEntries: CheckInSelfPreviewEntry[] = [];
     let totalAmount = 0;
@@ -775,15 +799,11 @@ export class CheckInService {
     let phone = '';
     let latestCheckedInAt: string | null = null;
 
-    for (const row of regRows) {
-      const reg = await this.registrationRepository.findOne({
-        where: { id: row.registration_id },
-      });
-      if (!reg) continue;
-
-      const entryLines =
-        await this.entryService.resolveLinesForRegistration(reg);
-      const entries = this.entryLinesToPreviewEntries(entryLines);
+    for (const { row, reg, entryLines } of loaded) {
+      const entries = this.entryLinesToPreviewEntries(
+        entryLines,
+        packageNameById,
+      );
       const checkedInAt = reg.checked_in_at
         ? reg.checked_in_at.toISOString()
         : null;
@@ -841,14 +861,20 @@ export class CheckInService {
 
   private entryLinesToPreviewEntries(
     lines: ActivityRegistrationEntryLine[],
+    packageNameById?: Map<number, string>,
   ): CheckInSelfPreviewEntry[] {
-    return lines.map((line) => ({
-      package_name: '—',
-      quantity: Number(line.quantity) || 1,
-      unit_price: Number(line.unit_price) || 0,
-      line_total: Number(line.line_total) || 0,
-      entry_code: line.entry_code != null ? String(line.entry_code) : null,
-    }));
+    return lines.map((line) => {
+      const pkgId = Number(line.package_id);
+      const name =
+        packageNameById?.get(pkgId) ?? (pkgId ? `แพ็กเกจ #${pkgId}` : '—');
+      return {
+        package_name: name,
+        quantity: Number(line.quantity) || 1,
+        unit_price: Number(line.unit_price) || 0,
+        line_total: Number(line.line_total) || 0,
+        entry_code: line.entry_code != null ? String(line.entry_code) : null,
+      };
+    });
   }
 
   async submitSelfCheckIn(

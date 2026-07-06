@@ -71,6 +71,25 @@ export class ActivityPackageService {
   }
 
   /**
+   * ชื่อของแพ็กเกจ (เฉพาะโหนดลูกสุดที่สมัคร) ตาม id — ไม่รวม path แม่ เพื่อให้สั้น
+   * รวมแพ็กเกจที่ถูกลบไปแล้วด้วย เพื่อให้รายการเก่ายังแสดงชื่อได้
+   */
+  async findLeafNamesByIds(ids: number[]): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    const unique = [
+      ...new Set(ids.filter((id) => Number.isFinite(id) && id > 0)),
+    ];
+    if (!unique.length) return out;
+    const rows = await this.packageRepository.find({
+      where: { id: In(unique) },
+    });
+    for (const row of rows) {
+      if (row.name) out.set(row.id, row.name);
+    }
+    return out;
+  }
+
+  /**
    * คืน slug path สำหรับทำ entry_code แบบแม่ -> ลูก
    * ข้ามโหนดที่ไม่มี slug และ concat โดยไม่ใส่ตัวคั่น
    * เช่น (ไม่มี)/(A)/(ไม่มี)/(A1)/(O) => AA1O

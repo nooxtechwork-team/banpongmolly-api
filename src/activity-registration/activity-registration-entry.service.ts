@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
@@ -6,9 +10,7 @@ import { ActivityRegistrationEntry } from '../entities/activity-registration-ent
 import { Activity } from '../entities/activity.entity';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityPackageService } from '../activity-package/activity-package.service';
-import {
-  allocateFormattedActivityEntryIndices,
-} from '../common/utils/activity-entry-index.util';
+import { allocateFormattedActivityEntryIndices } from '../common/utils/activity-entry-index.util';
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 
 export interface ActivityRegistrationEntryLine {
@@ -37,7 +39,9 @@ export class ActivityRegistrationEntryService {
     private readonly activityPackageService: ActivityPackageService,
   ) {}
 
-  entityToLine(entity: ActivityRegistrationEntry): ActivityRegistrationEntryLine {
+  entityToLine(
+    entity: ActivityRegistrationEntry,
+  ): ActivityRegistrationEntryLine {
     return {
       index: entity.entry_index,
       entry_code: entity.entry_code,
@@ -93,6 +97,13 @@ export class ActivityRegistrationEntryService {
     registration: ActivityRegistration,
   ): Promise<ActivityRegistrationEntryLine[]> {
     return this.findLinesByRegistrationId(registration.id);
+  }
+
+  /** ชื่อแพ็กเกจ (ตัวลูกสุด) ตาม package id — ใช้แสดงในหน้าเช็คอิน */
+  async resolvePackageLeafNames(
+    packageIds: number[],
+  ): Promise<Map<number, string>> {
+    return this.activityPackageService.findLeafNamesByIds(packageIds);
   }
 
   async findEntryEntity(
@@ -213,7 +224,9 @@ export class ActivityRegistrationEntryService {
         where: { registration_id: registrationId },
         order: { id: 'ASC' },
       });
-      const pending = entries.filter((row) => !String(row.entry_index ?? '').trim());
+      const pending = entries.filter(
+        (row) => !String(row.entry_index ?? '').trim(),
+      );
       if (!pending.length) return;
 
       await activityRepo.findOne({
