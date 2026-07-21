@@ -30,7 +30,6 @@ import {
   serializeActivityLiveEmbeds,
 } from '../common/utils/activity-live-embeds.util';
 import {
-  parseCompetitionDashboardJson,
   type CompetitionDashboardPayload,
 } from '../common/utils/competition-dashboard.util';
 import {
@@ -43,6 +42,7 @@ import {
   ActivityRegistrationEntryService,
   type ActivityRegistrationEntryLine,
 } from '../activity-registration/activity-registration-entry.service';
+import { ActivityCompetitionDashboardService } from './activity-competition-dashboard.service';
 
 const UPLOAD_SUBDIR = 'activities' as const;
 
@@ -54,10 +54,11 @@ function slugify(text: string): string {
     .replace(/[^\p{L}\p{N}-]/gu, '');
 }
 
-export type ActivityPublicDetail = Omit<
-  Activity,
-  'competition_dashboard_json'
-> & {
+export type ActivityAdminDetail = Activity & {
+  competition_dashboard: CompetitionDashboardPayload | null;
+};
+
+export type ActivityPublicDetail = Activity & {
   price_range: { min: number | null; max: number | null };
   tags?: ActivityTagDto[];
   sponsor_packages?: SponsorPackage[];
@@ -105,6 +106,7 @@ export class ActivityService {
     private readonly userActionLogService: UserActionLogService,
     private readonly legalPolicyService: LegalPolicyService,
     private readonly entryService: ActivityRegistrationEntryService,
+    private readonly competitionDashboardService: ActivityCompetitionDashboardService,
   ) {}
 
   async findAll(): Promise<Activity[]> {
@@ -687,6 +689,17 @@ export class ActivityService {
     return event;
   }
 
+  /** Admin detail — รวม competition_dashboard จากตาราง */
+  async findOneAdminDetail(id: number): Promise<ActivityAdminDetail> {
+    const event = await this.findOne(id);
+    const competition_dashboard =
+      await this.competitionDashboardService.getPayload(id);
+    return {
+      ...event,
+      competition_dashboard,
+    };
+  }
+
   async getSponsorPackagesForActivity(
     activityId: number,
   ): Promise<SponsorPackage[]> {
@@ -784,9 +797,8 @@ export class ActivityService {
         .addOrderBy('sponsor.created_at', 'ASC')
         .getMany(),
     ]);
-    const { competition_dashboard_json, ...rest } = activity;
     return {
-      ...rest,
+      ...activity,
       price_range,
       tags,
       sponsor_packages,
@@ -799,9 +811,8 @@ export class ActivityService {
         socials: this.parseSponsorSocialLinks(s.social_links_json),
       })),
       live_embeds: parseActivityLiveEmbedsJson(activity.live_embeds_json),
-      competition_dashboard: parseCompetitionDashboardJson(
-        competition_dashboard_json,
-      ),
+      competition_dashboard:
+        await this.competitionDashboardService.getPayload(activity.id),
       onsite_cash: getOnsiteCashStatus(activity),
     };
   }
@@ -915,7 +926,6 @@ export class ActivityService {
       activity_package_id: dto.activity_package_id ?? null,
       max_participants: dto.max_participants ?? 0,
       status: dto.status,
-      competition_dashboard_json: null,
     });
     const saved = await this.activityRepository.save(entity);
     if (dto.tags) {
@@ -1049,19 +1059,23 @@ export class ActivityService {
         })),
       );
     }
-    if (dto.competition_dashboard !== undefined) {
-      updates.competition_dashboard_json =
-        dto.competition_dashboard === null
-          ? null
-          : JSON.stringify(dto.competition_dashboard);
-    }
 
     const merged = this.activityRepository.merge(existing, updates);
     const saved = await this.activityRepository.save(merged);
+
+    if (dto.competition_dashboard !== undefined) {
+      await this.competitionDashboardService.replaceFromPayload(
+        saved.id,
+        dto.competition_dashboard === null
+          ? null
+          : (dto.competition_dashboard as CompetitionDashboardPayload),
+      );
+    }
+
     if (dto.tags) {
       await this.activityTagService.setTagsForActivity(saved.id, dto.tags);
     }
-    return saved;
+    return this.findOne(saved.id);
   }
 
   async softDelete(id: number): Promise<void> {

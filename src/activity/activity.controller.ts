@@ -68,8 +68,8 @@ export class ActivityController {
   }
 
   @Get(':id')
-  async detail(@Param('id', ParseIntPipe) id: number): Promise<Activity> {
-    return this.activityService.findOne(id);
+  async detail(@Param('id', ParseIntPipe) id: number) {
+    return this.activityService.findOneAdminDetail(id);
   }
 
   @Get(':id/sponsor-packages')

@@ -8,7 +8,11 @@ import { ActivityFavorite } from '../entities/activity-favorite.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { SponsorRegistration } from '../entities/sponsor.entity';
+import { ActivityCompetitionDashboard } from '../entities/activity-competition-dashboard.entity';
+import { ActivityCompetitionDashboardClassBlock } from '../entities/activity-competition-dashboard-class-block.entity';
+import { ActivityCompetitionDashboardEntry } from '../entities/activity-competition-dashboard-entry.entity';
 import { ActivityService } from './activity.service';
+import { ActivityCompetitionDashboardService } from './activity-competition-dashboard.service';
 import { ActivityFavoriteService } from './activity-favorite.service';
 import { ActivityTagService } from './activity-tag.service';
 import { ActivityController } from './activity.controller';
@@ -32,6 +36,9 @@ import { ActivityRegistrationModule } from '../activity-registration/activity-re
       ActivitySponsorPackage,
       SponsorPackage,
       SponsorRegistration,
+      ActivityCompetitionDashboard,
+      ActivityCompetitionDashboardClassBlock,
+      ActivityCompetitionDashboardEntry,
     ]),
     UploadModule,
     ActivityPackageModule,
@@ -42,11 +49,16 @@ import { ActivityRegistrationModule } from '../activity-registration/activity-re
   ],
   providers: [
     ActivityService,
+    ActivityCompetitionDashboardService,
     ActivityFavoriteService,
     ActivityTagService,
     AdminGuard,
   ],
   controllers: [ActivityController, PublicActivityController],
-  exports: [ActivityService, ActivityTagService],
+  exports: [
+    ActivityService,
+    ActivityCompetitionDashboardService,
+    ActivityTagService,
+  ],
 })
 export class ActivityModule {}

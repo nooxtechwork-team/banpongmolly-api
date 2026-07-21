@@ -1,5 +1,6 @@
 /**
- * โครงสร้าง Dashboard สรุปผลการแข่งขัน (เก็บเป็น JSON ใน activities.competition_dashboard_json)
+ * โครงสร้าง Dashboard สรุปผลการแข่งขัน
+ * Storage: ตาราง activity_competition_dashboard*
  */
 export interface CompetitionParticipantPayload {
   image_url?: string | null;
@@ -7,6 +8,7 @@ export interface CompetitionParticipantPayload {
   class_reward_image_url?: string | null;
   division_reward_image_url?: string | null;
   fish_owner?: string;
+  farm_name?: string;
   /** ชื่อเต็มแสดงใหญ่ (ถ้าว่างใช้ fish_owner) */
   display_name?: string;
   class_code?: string;
@@ -57,4 +59,11 @@ export function parseCompetitionDashboardJson(
   } catch {
     return null;
   }
+}
+
+export function serializeCompetitionDashboardPayload(
+  payload: CompetitionDashboardPayload | null | undefined,
+): string | null {
+  if (payload == null) return null;
+  return JSON.stringify(payload);
 }

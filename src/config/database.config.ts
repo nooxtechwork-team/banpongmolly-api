@@ -13,6 +13,9 @@ import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivityClassChangeRequest } from '../entities/activity-class-change-request.entity';
 import { ActivityClassChangeLog } from '../entities/activity-class-change-log.entity';
 import { ActivityRegistrationEntry } from '../entities/activity-registration-entry.entity';
+import { ActivityCompetitionDashboard } from '../entities/activity-competition-dashboard.entity';
+import { ActivityCompetitionDashboardClassBlock } from '../entities/activity-competition-dashboard-class-block.entity';
+import { ActivityCompetitionDashboardEntry } from '../entities/activity-competition-dashboard-entry.entity';
 import { ActivityFavorite } from '../entities/activity-favorite.entity';
 import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorRegistration } from '../entities/sponsor.entity';
@@ -54,6 +57,9 @@ export const getDatabaseConfig = (
     ActivityClassChangeRequest,
     ActivityClassChangeLog,
     ActivityRegistrationEntry,
+    ActivityCompetitionDashboard,
+    ActivityCompetitionDashboardClassBlock,
+    ActivityCompetitionDashboardEntry,
     ActivityFavorite,
     ActivitySponsorPackage,
     SponsorRegistration,
