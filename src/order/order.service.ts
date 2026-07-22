@@ -358,6 +358,7 @@ export class OrderService {
         registration_no: registrationNo ?? undefined,
         checked_in_at: checkedInAt,
         cancel_reason: o.cancel_reason ?? null,
+        payment_method: o.payment_method ?? PaymentMethod.BANK_TRANSFER,
       });
     });
 
@@ -553,7 +554,10 @@ export class OrderService {
     }
 
     return {
-      order,
+      order: {
+        ...order,
+        payment_method: order.payment_method ?? PaymentMethod.BANK_TRANSFER,
+      },
       registration,
       sponsor,
       activity,

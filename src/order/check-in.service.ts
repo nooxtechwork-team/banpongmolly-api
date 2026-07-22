@@ -73,6 +73,10 @@ export interface MyCheckInActivityItem {
   pending_count: number;
   checked_in_at: string | null;
   can_check_in: boolean;
+  /** สถานะช่วงเวลาเช็คอิน */
+  check_in_window: 'open' | 'not_yet' | 'closed';
+  check_in_open_at: string | null;
+  check_in_close_at: string | null;
 }
 
 export interface CheckInSelfPreviewEntry {
@@ -199,6 +203,26 @@ export class CheckInService {
         `หมดเวลาเช็คอินแล้ว (ปิดเช็คอินเมื่อ ${activity.check_in_close_at.toLocaleString('th-TH')})`,
       );
     }
+  }
+
+  /** แยกสถานะช่วงเช็คอินสำหรับแสดงผลฝั่งผู้ใช้ */
+  private resolveCheckInWindow(
+    openAt: Date | null,
+    closeAt: Date | null,
+    now: Date = new Date(),
+  ): 'open' | 'not_yet' | 'closed' {
+    if (openAt && now.getTime() < openAt.getTime()) return 'not_yet';
+    if (closeAt && now.getTime() > closeAt.getTime()) return 'closed';
+    return 'open';
+  }
+
+  private toIsoOrNull(value: unknown): string | null {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    }
+    if (value == null || String(value).trim() === '') return null;
+    const d = new Date(String(value));
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
   private assertWithinCheckInGeofence(
@@ -606,7 +630,7 @@ export class CheckInService {
     }
     interface ActivityGroup {
       base: MyCheckInActivityItem;
-      withinWindow: boolean;
+      checkInWindow: 'open' | 'not_yet' | 'closed';
       regs: RegRow[];
     }
 
@@ -635,12 +659,18 @@ export class CheckInService {
             : row.check_in_close_at
               ? new Date(String(row.check_in_close_at))
               : null;
-        const withinWindow =
-          (!openAt || now.getTime() >= openAt.getTime()) &&
-          (!closeAt || now.getTime() <= closeAt.getTime());
+        const openAtSafe =
+          openAt && !Number.isNaN(openAt.getTime()) ? openAt : null;
+        const closeAtSafe =
+          closeAt && !Number.isNaN(closeAt.getTime()) ? closeAt : null;
+        const checkInWindow = this.resolveCheckInWindow(
+          openAtSafe,
+          closeAtSafe,
+          now,
+        );
 
         group = {
-          withinWindow,
+          checkInWindow,
           regs: [],
           base: {
             activity_id: activityId,
@@ -662,6 +692,9 @@ export class CheckInService {
             pending_count: 0,
             checked_in_at: null,
             can_check_in: false,
+            check_in_window: checkInWindow,
+            check_in_open_at: this.toIsoOrNull(openAtSafe),
+            check_in_close_at: this.toIsoOrNull(closeAtSafe),
           },
         };
         byActivity.set(activityId, group);
@@ -697,7 +730,8 @@ export class CheckInService {
         registration_count: group.regs.length,
         pending_count: pending.length,
         checked_in_at: pending.length ? null : latestCheckedIn,
-        can_check_in: pending.length > 0 && group.withinWindow,
+        can_check_in: pending.length > 0 && group.checkInWindow === 'open',
+        check_in_window: group.checkInWindow,
       };
     });
   }
