@@ -28,6 +28,7 @@ export type AuditEntityType =
   | 'province'
   | 'organizer'
   | 'news'
+  | 'mail_content'
   | 'banner'
   | 'banner_category'
   | 'banner_position'

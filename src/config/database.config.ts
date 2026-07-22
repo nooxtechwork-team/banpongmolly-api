@@ -28,6 +28,8 @@ import { UserActionLog } from '../entities/user-action-log.entity';
 import { ContactMessage } from '../entities/contact-message.entity';
 import { PaymentConfig } from '../entities/payment-config.entity';
 import { News } from '../entities/news.entity';
+import { MailContent } from '../entities/mail-content.entity';
+import { MailContentRecipient } from '../entities/mail-content-recipient.entity';
 import { LegalPolicy } from '../entities/legal-policy.entity';
 import { PolicyAcceptance } from '../entities/policy-acceptance.entity';
 import { EntryPopupConfig } from '../entities/entry-popup-config.entity';
@@ -71,6 +73,8 @@ export const getDatabaseConfig = (
     UserActionLog,
     ContactMessage,
     News,
+    MailContent,
+    MailContentRecipient,
     PaymentConfig,
     LegalPolicy,
     PolicyAcceptance,

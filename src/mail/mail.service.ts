@@ -27,10 +27,12 @@ export class MailService {
 
   /** @returns true ถ้าส่งจริง, false ถ้าไม่ได้ตั้งค่า SMTP (ข้าม) */
   async sendRawEmail(options: {
-    to: string;
+    to: string | string[];
     subject: string;
     text?: string;
     html?: string;
+    cc?: string | string[];
+    bcc?: string | string[];
     attachments?: { filename: string; content: Buffer | string }[];
   }): Promise<boolean> {
     if (!this.transporter) {
@@ -41,6 +43,8 @@ export class MailService {
       await this.transporter.sendMail({
         from: this.configService.get<string>('MAIL_USERNAME'),
         to: options.to,
+        cc: options.cc,
+        bcc: options.bcc,
         subject: options.subject,
         text: options.text,
         html: options.html,
@@ -48,8 +52,11 @@ export class MailService {
       });
       return true;
     } catch (err) {
+      const toLabel = Array.isArray(options.to)
+        ? options.to.join(', ')
+        : options.to;
       this.logger.error(
-        `Failed to send email to ${options.to}: ${
+        `Failed to send email to ${toLabel}: ${
           err instanceof Error ? err.message : err
         }`,
       );
