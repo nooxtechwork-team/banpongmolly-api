@@ -27,6 +27,7 @@ import { LoginLogModule } from './login-log/login-log.module';
 import { UserActionLogModule } from './user-action-log/user-action-log.module';
 import { ActivityRegistrationModule } from './activity-registration/activity-registration.module';
 import { QueueModule } from './queue/queue.module';
+import { PrintJobModule } from './print-job/print-job.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -41,6 +42,7 @@ import { getDatabaseConfig } from './config/database.config';
       inject: [ConfigService],
     }),
     QueueModule,
+    PrintJobModule,
     MailModule,
     AuthModule,
     ProvinceModule,

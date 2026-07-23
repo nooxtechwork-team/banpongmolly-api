@@ -35,6 +35,7 @@ import { PolicyAcceptance } from '../entities/policy-acceptance.entity';
 import { EntryPopupConfig } from '../entities/entry-popup-config.entity';
 import { HeroBannerSlide } from '../entities/hero-banner-slide.entity';
 import { SponsorTierLookup } from '../entities/sponsor-tier.entity';
+import { PrintJob } from '../entities/print-job.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -81,6 +82,7 @@ export const getDatabaseConfig = (
     EntryPopupConfig,
     HeroBannerSlide,
     SponsorTierLookup,
+    PrintJob,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',
