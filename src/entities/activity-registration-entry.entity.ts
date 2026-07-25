@@ -60,6 +60,9 @@ export class ActivityRegistrationEntry {
   @Column({ type: 'text', nullable: true })
   checkout_remark: string | null;
 
+  @Column({ type: 'tinyint', nullable: true, default: 0 })
+  ready_to_checkout: boolean | null;
+
   @CreateDateColumn()
   created_at: Date;
 

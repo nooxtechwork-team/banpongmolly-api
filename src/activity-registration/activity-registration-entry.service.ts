@@ -27,6 +27,7 @@ export interface ActivityRegistrationEntryLine {
   checkout_request_note?: string | null;
   checkout_request_email_sent_at?: string | null;
   checkout_remark?: string | null;
+  ready_to_checkout?: boolean | null;
 }
 
 @Injectable()
@@ -58,6 +59,7 @@ export class ActivityRegistrationEntryService {
         entity.checkout_request_email_sent_at,
       ),
       checkout_remark: entity.checkout_remark,
+      ready_to_checkout: entity.ready_to_checkout ?? false,
     };
   }
 
@@ -349,6 +351,7 @@ export class ActivityRegistrationEntryService {
         line.checkout_request_email_sent_at,
       ),
       checkout_remark: line.checkout_remark ?? null,
+      ready_to_checkout: line.ready_to_checkout ?? false,
     };
   }
 
