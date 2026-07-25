@@ -777,6 +777,14 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{
     device: CheckoutDevice;
     current_ticket: CheckoutTicketDetail | null;
+    board: {
+      total: number;
+      waiting: number;
+      preparing: number;
+      ready: number;
+      complete: number;
+    } | null;
+    next_waiting: { queue_code: string; queue_no: number; applicant_name: string | null } | null;
   }> {
     const code = deviceCode.trim().toUpperCase();
     const device = await this.deviceRepo.findOne({
@@ -794,9 +802,6 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           ? CheckoutDeviceStatus.ONLINE_BUSY
           : CheckoutDeviceStatus.ONLINE_IDLE;
     }
-    if (activityId != null && device.activity_id == null) {
-      // transient binding not persisted — activity only needed for claim
-    }
     await this.deviceRepo.save(device);
 
     let current: CheckoutTicketDetail | null = null;
@@ -807,7 +812,79 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         current = null;
       }
     }
-    return { device, current_ticket: current };
+
+    const resolvedActivityId =
+      device.activity_id ?? activityId ?? current?.activity_id ?? null;
+
+    let board: {
+      total: number;
+      waiting: number;
+      preparing: number;
+      ready: number;
+      complete: number;
+    } | null = null;
+    let nextWaiting: {
+      queue_code: string;
+      queue_no: number;
+      applicant_name: string | null;
+    } | null = null;
+
+    if (resolvedActivityId != null) {
+      const payload = await this.getBoard(resolvedActivityId);
+      board = {
+        total:
+          payload.counts.waiting +
+          payload.counts.preparing +
+          payload.counts.ready +
+          payload.counts.complete,
+        waiting: payload.counts.waiting,
+        preparing: payload.counts.preparing,
+        ready: payload.counts.ready,
+        complete: payload.counts.complete,
+      };
+      nextWaiting = await this.peekNextWaiting(resolvedActivityId);
+    }
+
+    return {
+      device,
+      current_ticket: current,
+      board,
+      next_waiting: nextWaiting,
+    };
+  }
+
+  /** Peek oldest waiting ticket without locking (for POS UI preview). */
+  async peekNextWaiting(activityId: number): Promise<{
+    queue_code: string;
+    queue_no: number;
+    applicant_name: string | null;
+  } | null> {
+    const waiting = await this.ticketRepo.findOne({
+      where: {
+        activity_id: activityId,
+        status: CheckoutTicketStatus.WAITING,
+      },
+      order: { queue_no: 'ASC' },
+    });
+    if (!waiting) return null;
+
+    const firstItem = await this.itemRepo.findOne({
+      where: { ticket_id: waiting.id },
+      order: { id: 'ASC' },
+    });
+    let applicantName: string | null = null;
+    if (firstItem) {
+      const reg = await this.registrationRepo.findOne({
+        where: { id: firstItem.registration_id },
+      });
+      applicantName = reg?.applicant_name ?? null;
+    }
+
+    return {
+      queue_code: waiting.queue_code,
+      queue_no: waiting.queue_no,
+      applicant_name: applicantName,
+    };
   }
 
   async getCurrentForDevice(
