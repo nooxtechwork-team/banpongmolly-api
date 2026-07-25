@@ -36,6 +36,10 @@ import { EntryPopupConfig } from '../entities/entry-popup-config.entity';
 import { HeroBannerSlide } from '../entities/hero-banner-slide.entity';
 import { SponsorTierLookup } from '../entities/sponsor-tier.entity';
 import { PrintJob } from '../entities/print-job.entity';
+import { CheckoutDevice } from '../entities/checkout-device.entity';
+import { CheckoutTicket } from '../entities/checkout-ticket.entity';
+import { CheckoutTicketItem } from '../entities/checkout-ticket-item.entity';
+import { CheckoutTicketEvent } from '../entities/checkout-ticket-event.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -83,6 +87,10 @@ export const getDatabaseConfig = (
     HeroBannerSlide,
     SponsorTierLookup,
     PrintJob,
+    CheckoutDevice,
+    CheckoutTicket,
+    CheckoutTicketItem,
+    CheckoutTicketEvent,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',

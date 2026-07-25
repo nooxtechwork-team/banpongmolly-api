@@ -28,6 +28,7 @@ import { UserActionLogModule } from './user-action-log/user-action-log.module';
 import { ActivityRegistrationModule } from './activity-registration/activity-registration.module';
 import { QueueModule } from './queue/queue.module';
 import { PrintJobModule } from './print-job/print-job.module';
+import { CheckoutQueueModule } from './checkout-queue/checkout-queue.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -43,6 +44,7 @@ import { getDatabaseConfig } from './config/database.config';
     }),
     QueueModule,
     PrintJobModule,
+    CheckoutQueueModule,
     MailModule,
     AuthModule,
     ProvinceModule,
