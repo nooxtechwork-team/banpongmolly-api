@@ -15,6 +15,7 @@ export enum CheckoutDeviceStatus {
 
 @Entity('checkout_devices')
 @Index('uq_checkout_device_code', ['device_code'], { unique: true })
+@Index('uq_checkout_device_api_key', ['api_key'], { unique: true })
 @Index('idx_checkout_device_activity', ['activity_id'])
 export class CheckoutDevice {
   @PrimaryGeneratedColumn()
@@ -29,6 +30,10 @@ export class CheckoutDevice {
 
   @Column({ type: 'varchar', length: 255 })
   name: string;
+
+  /** API key เฉพาะเครื่อง — header X-POS-Api-Key */
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  api_key: string | null;
 
   @Column({ type: 'boolean', default: true })
   is_active: boolean;

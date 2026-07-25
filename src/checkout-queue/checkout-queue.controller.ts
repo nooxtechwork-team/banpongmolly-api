@@ -7,7 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { PosDeviceKeyGuard } from '../print-job/pos-device-key.guard';
+import { PosApiKeyGuard } from '../pos-auth/pos-api-key.guard';
 import { CheckoutQueueService } from './checkout-queue.service';
 import {
   ClaimNextCheckoutQueueDto,
@@ -21,14 +21,14 @@ export class CheckoutQueueController {
 
   /** Pull next waiting ticket and lock to this device */
   @Post('claim-next')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   claimNext(@Body() dto: ClaimNextCheckoutQueueDto) {
     return this.checkoutQueueService.claimNext(dto);
   }
 
   /** Same as claim-next via GET for simple POS clients */
   @Get('next')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   next(
     @Query('device_code') deviceCode: string,
     @Query('activity_id') activityId?: string,
@@ -46,13 +46,13 @@ export class CheckoutQueueController {
   }
 
   @Get('devices/:deviceCode/current')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   current(@Param('deviceCode') deviceCode: string) {
     return this.checkoutQueueService.getCurrentForDevice(deviceCode);
   }
 
   @Post('devices/:deviceCode/heartbeat')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   heartbeat(
     @Param('deviceCode') deviceCode: string,
     @Body() dto: DeviceHeartbeatDto,
@@ -61,7 +61,7 @@ export class CheckoutQueueController {
   }
 
   @Post(':queueCode/ready')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   ready(
     @Param('queueCode') queueCode: string,
     @Body() dto: CheckoutQueueTransitionDto,
@@ -70,7 +70,7 @@ export class CheckoutQueueController {
   }
 
   @Post(':queueCode/complete')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   complete(
     @Param('queueCode') queueCode: string,
     @Body() dto: CheckoutQueueTransitionDto,

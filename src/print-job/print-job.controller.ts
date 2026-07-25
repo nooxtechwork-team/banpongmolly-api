@@ -13,7 +13,7 @@ import { ResponseInterceptor } from '../common/interceptors/response.interceptor
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { PrintJobService } from './print-job.service';
-import { PosDeviceKeyGuard } from './pos-device-key.guard';
+import { PosApiKeyGuard } from '../pos-auth/pos-api-key.guard';
 import {
   ClaimPrintJobDto,
   CompletePrintJobDto,
@@ -52,14 +52,14 @@ export class PrintJobController {
 
   /** POS device: claim next pending job */
   @Post('claim')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   claim(@Body() dto: ClaimPrintJobDto) {
     return this.printJobService.claim(dto);
   }
 
   /** POS device: mark printed or failed */
   @Post(':id/complete')
-  @UseGuards(PosDeviceKeyGuard)
+  @UseGuards(PosApiKeyGuard)
   complete(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CompletePrintJobDto,

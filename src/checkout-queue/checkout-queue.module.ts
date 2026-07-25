@@ -11,7 +11,7 @@ import { Order } from '../entities/order.entity';
 import { AuthModule } from '../auth/auth.module';
 import { ActivityPackageModule } from '../activity-package/activity-package.module';
 import { PrintJobModule } from '../print-job/print-job.module';
-import { PosDeviceKeyGuard } from '../print-job/pos-device-key.guard';
+import { PosAuthModule } from '../pos-auth/pos-auth.module';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CheckoutQueueService } from './checkout-queue.service';
 import { CheckoutQueueGateway } from './checkout-queue.gateway';
@@ -19,6 +19,7 @@ import { CheckoutQueueController } from './checkout-queue.controller';
 import { CheckoutQueueAdminController } from './checkout-queue-admin.controller';
 import { MyCheckoutQueueController } from './checkout-queue-my.controller';
 import { CheckoutBoardController } from './checkout-board.controller';
+import { PosDeviceController } from './pos-device.controller';
 
 @Module({
   imports: [
@@ -35,19 +36,16 @@ import { CheckoutBoardController } from './checkout-board.controller';
     AuthModule,
     ActivityPackageModule,
     PrintJobModule,
+    PosAuthModule,
   ],
   controllers: [
     CheckoutQueueController,
     CheckoutQueueAdminController,
     MyCheckoutQueueController,
     CheckoutBoardController,
+    PosDeviceController,
   ],
-  providers: [
-    CheckoutQueueService,
-    CheckoutQueueGateway,
-    PosDeviceKeyGuard,
-    AdminGuard,
-  ],
+  providers: [CheckoutQueueService, CheckoutQueueGateway, AdminGuard],
   exports: [CheckoutQueueService],
 })
 export class CheckoutQueueModule {}

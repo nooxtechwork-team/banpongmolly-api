@@ -45,6 +45,12 @@ export class CheckoutQueueAdminController {
     return this.checkoutQueueService.updateDevice(id, dto);
   }
 
+  /** ออก API key ใหม่ให้เครื่อง (สำหรับตั้งค่าในแอป Sunmi) */
+  @Post('devices/:id/rotate-key')
+  rotateDeviceKey(@Param('id', ParseIntPipe) id: number) {
+    return this.checkoutQueueService.rotateDeviceKey(id);
+  }
+
   @Get('activities/:activityId/board')
   board(@Param('activityId', ParseIntPipe) activityId: number) {
     return this.checkoutQueueService.getBoard(activityId);

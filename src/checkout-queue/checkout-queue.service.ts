@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -153,11 +154,14 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     if (dto.activity_id != null) {
       await this.requireActivity(dto.activity_id);
     }
+    const apiKey = dto.api_key?.trim() || this.generateApiKey();
+    await this.assertApiKeyUnique(apiKey);
     const device = this.deviceRepo.create({
       device_code: code,
       name: dto.name.trim() || code,
       activity_id: dto.activity_id ?? null,
       is_active: dto.is_active ?? true,
+      api_key: apiKey,
       status: CheckoutDeviceStatus.OFFLINE,
       current_ticket_id: null,
       last_heartbeat_at: null,
@@ -176,6 +180,20 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       device.activity_id = dto.activity_id;
     }
     if (dto.is_active != null) device.is_active = dto.is_active;
+    if (dto.api_key !== undefined) {
+      const key = dto.api_key.trim();
+      if (key) {
+        await this.assertApiKeyUnique(key, device.id);
+        device.api_key = key;
+      }
+    }
+    return this.deviceRepo.save(device);
+  }
+
+  /** ออก API key ใหม่ให้เครื่อง (rotate) — คีย์เดิมจะใช้ไม่ได้ทันที */
+  async rotateDeviceKey(id: number): Promise<CheckoutDevice> {
+    const device = await this.requireDeviceById(id);
+    device.api_key = this.generateApiKey();
     return this.deviceRepo.save(device);
   }
 
@@ -1091,6 +1109,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     if (value instanceof Date) return this.toQueueDate(value);
     const s = String(value);
     return s.length >= 10 ? s.slice(0, 10) : s;
+  }
+
+  private generateApiKey(): string {
+    return `pos_${randomBytes(24).toString('hex')}`;
+  }
+
+  private async assertApiKeyUnique(
+    apiKey: string,
+    ignoreDeviceId?: number,
+  ): Promise<void> {
+    const existing = await this.deviceRepo.findOne({
+      where: { api_key: apiKey },
+    });
+    if (existing && existing.id !== ignoreDeviceId) {
+      throw new ConflictException('API key นี้ถูกใช้กับเครื่องอื่นแล้ว');
+    }
   }
 
   private async requireActivity(id: number): Promise<Activity> {

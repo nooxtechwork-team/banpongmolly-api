@@ -106,6 +106,12 @@ export class UpsertCheckoutDeviceDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  /** กำหนด API key เอง (ไม่ระบุ = ระบบสุ่มให้อัตโนมัติ) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  api_key?: string;
 }
 
 export class UpdateCheckoutDeviceDto {
@@ -123,12 +129,76 @@ export class UpdateCheckoutDeviceDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  api_key?: string;
 }
 
 export class DeviceHeartbeatDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  device_code?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   activity_id?: number;
+}
+
+/**
+ * DTO สำหรับ endpoint ฝั่งเครื่อง POS (/pos/*)
+ * device_code เป็น optional เพราะถ้าใช้ per-device API key ระบบจะรู้เครื่องเองอยู่แล้ว
+ */
+export class PosClaimNextDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  device_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  staff_user_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  staff_name?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  activity_id?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  print?: boolean;
+}
+
+export class PosTransitionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  device_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  staff_user_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  staff_name?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  print?: boolean;
 }
