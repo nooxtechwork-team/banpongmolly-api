@@ -47,8 +47,8 @@ const ACTIVE_TICKET_STATUSES = [
   CheckoutTicketStatus.READY,
 ] as const;
 
-const HEARTBEAT_OFFLINE_MS = 30_000;
-const RECLAIM_INTERVAL_MS = 10_000;
+const HEARTBEAT_OFFLINE_MS = 90_000;
+const RECLAIM_INTERVAL_MS = 15_000;
 const QUEUE_CODE_PREFIX = 'A';
 
 export type CheckoutTicketDetail = {
@@ -808,8 +808,45 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     if (device.current_ticket_id != null) {
       try {
         current = await this.getTicketDetail(device.current_ticket_id);
-      } catch {
-        current = null;
+      } catch (err) {
+        this.logger.warn(
+          `heartbeat getTicketDetail(${device.current_ticket_id}) failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        // ยังถือคิวอยู่ — ส่งข้อมูลขั้นต่ำจากแถว ticket กัน client คิดว่าถูก reclaim
+        const row = await this.ticketRepo.findOne({
+          where: { id: device.current_ticket_id },
+        });
+        if (
+          row &&
+          (row.status === CheckoutTicketStatus.PREPARING ||
+            row.status === CheckoutTicketStatus.READY)
+        ) {
+          current = {
+            id: row.id,
+            activity_id: row.activity_id,
+            user_id: row.user_id,
+            queue_no: row.queue_no,
+            queue_date: this.normalizeQueueDate(row.queue_date),
+            queue_code: row.queue_code,
+            status: row.status,
+            device_id: row.device_id,
+            device_code: device.device_code,
+            staff_user_id: row.staff_user_id,
+            staff_name: row.staff_name,
+            note: row.note,
+            cancel_reason: row.cancel_reason,
+            requested_at: row.requested_at.toISOString(),
+            preparing_at: row.preparing_at?.toISOString() ?? null,
+            ready_at: row.ready_at?.toISOString() ?? null,
+            completed_at: row.completed_at?.toISOString() ?? null,
+            cancelled_at: row.cancelled_at?.toISOString() ?? null,
+            applicant_name: null,
+            position: null,
+            items: [],
+          };
+        }
       }
     }
 
@@ -1049,10 +1086,9 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       .andWhere('d.status != :offline', {
         offline: CheckoutDeviceStatus.OFFLINE,
       })
-      .andWhere(
-        '(d.last_heartbeat_at IS NULL OR d.last_heartbeat_at < :cutoff)',
-        { cutoff },
-      )
+      // ต้องมี heartbeat จริงก่อน — อย่า reclaim จาก last_heartbeat_at = NULL
+      .andWhere('d.last_heartbeat_at IS NOT NULL')
+      .andWhere('d.last_heartbeat_at < :cutoff', { cutoff })
       .getMany();
 
     let reclaimed = 0;
