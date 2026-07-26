@@ -8,7 +8,18 @@ COPY package.json pnpm-lock.yaml ./
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm build
+RUN pnpm build \
+  && mkdir -p dist/scripts \
+  && pnpm exec tsc scripts/purge-old-logs.ts \
+    --outDir dist/scripts \
+    --rootDir scripts \
+    --module commonjs \
+    --moduleResolution node \
+    --esModuleInterop \
+    --target ES2023 \
+    --skipLibCheck \
+    --declaration false \
+    --sourceMap false
 
 # --- Production Stage ---
 FROM node:20-alpine AS runner

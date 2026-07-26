@@ -101,7 +101,54 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 
 npx puppeteer browsers install chrome
 
-## ส่งใบเสร็จทางอีเมลแบบกวาด (cron)
+## กวาดลบ log เก่า (cron)
+
+สคริปต์ `scripts/purge-old-logs.ts` ลบแถวเก่าแบบ batch — เหมาะกับตารางที่โตเร็วโดยเฉพาะ `access_logs`
+
+**default retention**
+
+| ตาราง | เก็บ |
+|---|---|
+| `access_logs` | 14 วัน |
+| `login_logs` | 90 วัน |
+| `user_action_logs` | 180 วัน |
+| `print_jobs` (done/failed/cancelled) | 30 วัน |
+| `checkout_ticket_events` (ticket จบแล้ว) | 90 วัน |
+| `audit_logs` | **ไม่ลบ** (ตั้ง `AUDIT_LOG_RETENTION_DAYS` ถ้าต้องการ) |
+
+ทดสอบ dry-run:
+
+```bash
+DRY_RUN=1 pnpm run script:purge-old-logs
+```
+
+รันจริง:
+
+```bash
+pnpm run script:purge-old-logs
+```
+
+หลัง `pnpm build` / บน Coolify container:
+
+```bash
+node dist/scripts/purge-old-logs.js
+```
+
+ตัวอย่าง Coolify cron — **วันละครั้ง 03:15**
+
+```text
+15 3 * * * node dist/scripts/purge-old-logs.js
+```
+
+หรือถ้าใช้ pnpm ใน container:
+
+```text
+15 3 * * * pnpm run script:purge-old-logs
+```
+
+ตัวแปรเพิ่มเติม: `PURGE_BATCH_SIZE`, `ACCESS_LOG_RETENTION_DAYS`, `DRY_RUN=1`, `PURGE_OPTIMIZE=1` (OPTIMIZE หลังลบ — ระวัง table lock)
+
+
 
 ออเดอร์สถานะ `paid` ที่มี `customer_email` และยังไม่มี `receipt_email_sent_at` จะถูกส่งใบเสร็จ PDF ทางเมลเมื่อรันสคริปต์
 
