@@ -50,6 +50,10 @@ export const getDatabaseConfig = (
   username: configService.get<string>('DATABASE_USERNAME'),
   password: configService.get<string>('DATABASE_PASSWORD'),
   database: configService.get<string>('DATABASE_NAME'),
+  // Heartbeat reclaim must not depend on MySQL session TZ vs Node Date.
+  // Store/compare epoch ms for reclaim; force UTC for remaining datetime fields.
+  timezone: 'Z',
+  dateStrings: false,
   entities: [
     User,
     UserAuth,

@@ -47,7 +47,13 @@ const ACTIVE_TICKET_STATUSES = [
   CheckoutTicketStatus.READY,
 ] as const;
 
-const HEARTBEAT_OFFLINE_MS = 90_000;
+/** เครื่องไม่มี heartbeat → ถือว่า offline (ยังไม่คืนคิวทันที) */
+const DEVICE_OFFLINE_MS = 60_000;
+/**
+ * คืนคิว preparing กลับ waiting เมื่อเครื่องเงียบจริง ๆ
+ * ต้องยาวพอให้ staff เดินไปหยิบปลาได้ (เดิม 30–90 วิ สั้นเกินไป)
+ */
+const TICKET_RECLAIM_PREPARING_MS = 15 * 60_000;
 const RECLAIM_INTERVAL_MS = 15_000;
 const QUEUE_CODE_PREFIX = 'A';
 
@@ -165,6 +171,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       status: CheckoutDeviceStatus.OFFLINE,
       current_ticket_id: null,
       last_heartbeat_at: null,
+      last_heartbeat_ms: null,
     });
     return this.deviceRepo.save(device);
   }
@@ -531,7 +538,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         .getOne();
 
       const now = new Date();
-      device.last_heartbeat_at = now;
+      this.touchDeviceHeartbeat(device, now);
 
       if (!waiting) {
         device.status = CheckoutDeviceStatus.ONLINE_IDLE;
@@ -750,7 +757,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       if (device) {
         device.status = CheckoutDeviceStatus.ONLINE_IDLE;
         device.current_ticket_id = null;
-        device.last_heartbeat_at = now;
+        this.touchDeviceHeartbeat(device, now);
         await deviceRepo.save(device);
       }
 
@@ -795,7 +802,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     const now = new Date();
-    device.last_heartbeat_at = now;
+    this.touchDeviceHeartbeat(device, now);
     if (device.status === CheckoutDeviceStatus.OFFLINE) {
       device.status =
         device.current_ticket_id != null
@@ -1079,20 +1086,25 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   // ─── Reclaim stale devices ─────────────────────────────────────────
 
   async reclaimStaleDevices(): Promise<number> {
-    const cutoff = new Date(Date.now() - HEARTBEAT_OFFLINE_MS);
-    const stale = await this.deviceRepo
+    const nowMs = Date.now();
+    const offlineBeforeMs = nowMs - DEVICE_OFFLINE_MS;
+    const reclaimBeforeMs = nowMs - TICKET_RECLAIM_PREPARING_MS;
+
+    // Use epoch ms column — datetime TZ skew was reclaiming tickets within seconds
+    const candidates = await this.deviceRepo
       .createQueryBuilder('d')
       .where('d.is_active = true')
       .andWhere('d.status != :offline', {
         offline: CheckoutDeviceStatus.OFFLINE,
       })
-      // ต้องมี heartbeat จริงก่อน — อย่า reclaim จาก last_heartbeat_at = NULL
-      .andWhere('d.last_heartbeat_at IS NOT NULL')
-      .andWhere('d.last_heartbeat_at < :cutoff', { cutoff })
+      .andWhere('d.last_heartbeat_ms IS NOT NULL')
+      .andWhere('CAST(d.last_heartbeat_ms AS UNSIGNED) < :offlineBeforeMs', {
+        offlineBeforeMs,
+      })
       .getMany();
 
     let reclaimed = 0;
-    for (const device of stale) {
+    for (const device of candidates) {
       const activityIds = await this.dataSource.transaction(async (manager) => {
         const deviceRepo = manager.getRepository(CheckoutDevice);
         const ticketRepo = manager.getRepository(CheckoutTicket);
@@ -1105,23 +1117,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           lock: { mode: 'pessimistic_write' },
         });
         if (!locked) return [] as number[];
-        if (
-          locked.last_heartbeat_at &&
-          locked.last_heartbeat_at >= cutoff
-        ) {
+
+        const hbMs = this.deviceHeartbeatMs(locked);
+        if (hbMs == null || hbMs >= offlineBeforeMs) {
           return [] as number[];
         }
 
         const affectedActivityIds: number[] = [];
-        if (locked.current_ticket_id != null) {
+        const canReclaimTicket = hbMs < reclaimBeforeMs;
+        let clearedTicket = false;
+
+        if (locked.current_ticket_id != null && canReclaimTicket) {
           const ticket = await ticketRepo.findOne({
             where: { id: locked.current_ticket_id },
             lock: { mode: 'pessimistic_write' },
           });
-          if (
-            ticket &&
-            ticket.status === CheckoutTicketStatus.PREPARING
-          ) {
+          if (ticket && ticket.status === CheckoutTicketStatus.PREPARING) {
             ticket.status = CheckoutTicketStatus.WAITING;
             ticket.device_id = null;
             ticket.staff_user_id = null;
@@ -1149,16 +1160,24 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
                 to_status: CheckoutTicketStatus.WAITING,
                 actor_user_id: null,
                 device_id: locked.id,
-                meta_json: JSON.stringify({ reason: 'heartbeat_timeout' }),
+                meta_json: JSON.stringify({
+                  reason: 'heartbeat_timeout',
+                  timeout_ms: TICKET_RECLAIM_PREPARING_MS,
+                  last_heartbeat_ms: hbMs,
+                }),
               }),
             );
             affectedActivityIds.push(ticket.activity_id);
             reclaimed += 1;
+            locked.current_ticket_id = null;
+            clearedTicket = true;
           }
         }
 
         locked.status = CheckoutDeviceStatus.OFFLINE;
-        locked.current_ticket_id = null;
+        if (clearedTicket) {
+          locked.current_ticket_id = null;
+        }
         await deviceRepo.save(locked);
         return affectedActivityIds;
       });
@@ -1169,6 +1188,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return reclaimed;
+  }
+
+  /** Timezone-safe heartbeat stamp (epoch ms + legacy datetime). */
+  private touchDeviceHeartbeat(device: CheckoutDevice, at = new Date()): void {
+    device.last_heartbeat_ms = String(at.getTime());
+    device.last_heartbeat_at = at;
+  }
+
+  private deviceHeartbeatMs(device: CheckoutDevice): number | null {
+    // Only trust epoch ms — last_heartbeat_at datetime is TZ-skewed vs MySQL NOW()
+    // (observed ~7h on api-dev) and must not drive reclaim.
+    if (device.last_heartbeat_ms == null || String(device.last_heartbeat_ms).length === 0) {
+      return null;
+    }
+    const n = Number(device.last_heartbeat_ms);
+    return Number.isFinite(n) && n > 0 ? n : null;
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────

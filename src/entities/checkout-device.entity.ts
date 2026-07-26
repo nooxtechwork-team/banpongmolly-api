@@ -48,6 +48,14 @@ export class CheckoutDevice {
   @Column({ type: 'int', nullable: true })
   current_ticket_id: number | null;
 
+  /**
+   * Heartbeat time as Unix epoch milliseconds (timezone-safe).
+   * Do NOT use datetime here — MySQL DATETIME + TZ skew caused false reclaim in seconds.
+   */
+  @Column({ type: 'bigint', nullable: true })
+  last_heartbeat_ms: string | null;
+
+  /** @deprecated kept for backward compat / display; prefer last_heartbeat_ms */
   @Column({ type: 'datetime', precision: 6, nullable: true })
   last_heartbeat_at: Date | null;
 
