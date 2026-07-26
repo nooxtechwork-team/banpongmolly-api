@@ -1,4 +1,12 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { PrintJobType } from '../../entities/print-job.entity';
 
 export class CreateQueueTicketDto {
@@ -60,6 +68,27 @@ export class CompletePrintJobDto {
   @IsOptional()
   @IsIn(['done', 'failed'])
   status?: 'done' | 'failed';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  error?: string;
+}
+
+/** POS: บันทึกผลพิมพ์ local ลง print_jobs (ประวัติ / reprint) */
+export class PosPrintReportDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ticket_id: number;
+
+  @IsIn(['done', 'failed'])
+  status: 'done' | 'failed';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  device_code?: string;
 
   @IsOptional()
   @IsString()

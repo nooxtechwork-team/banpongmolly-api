@@ -25,9 +25,7 @@ import { ActivityRegistrationEntry } from '../entities/activity-registration-ent
 import { Activity } from '../entities/activity.entity';
 import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { User, UserRole } from '../entities/user.entity';
-import { PrintJobType } from '../entities/print-job.entity';
 import { ActivityPackageService } from '../activity-package/activity-package.service';
-import { PrintJobService } from '../print-job/print-job.service';
 import {
   CheckoutQueueGateway,
   type CheckoutBoardPayload,
@@ -88,7 +86,6 @@ export type CheckoutTicketDetail = {
     entry_code: string | null;
     package_name: string | null;
   }>;
-  print_job_id?: number | null;
 };
 
 @Injectable()
@@ -115,7 +112,6 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     private readonly orderRepo: Repository<Order>,
     private readonly dataSource: DataSource,
     private readonly activityPackageService: ActivityPackageService,
-    private readonly printJobService: PrintJobService,
     private readonly gateway: CheckoutQueueGateway,
   ) {}
 
@@ -577,25 +573,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
     if (!result) return null;
 
-    let printJobId: number | null = null;
-    if (dto.print) {
-      try {
-        const detail = await this.getTicketDetail(result.ticketId);
-        const job = await this.printJobService.createQueueTicket({
-          job_type: PrintJobType.FISH_RETURN,
-          label: `${detail.queue_code} · ${detail.applicant_name || ''}`.trim(),
-          target_device_id: result.deviceCode,
-        });
-        printJobId = job.id;
-      } catch (err) {
-        this.logger.warn(
-          `FISH_RETURN print failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
     const detail = await this.getTicketDetail(result.ticketId);
-    if (printJobId != null) detail.print_job_id = printJobId;
     await this.emitLive(detail);
     return detail;
   }
@@ -663,21 +641,6 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         }),
       );
     });
-
-    if (dto.print) {
-      try {
-        const detail = await this.getTicketDetail(ticket.id);
-        await this.printJobService.createQueueTicket({
-          job_type: PrintJobType.FISH_RETURN,
-          label: `${detail.queue_code} · ${detail.applicant_name || ''}`.trim(),
-          target_device_id: dto.device_code?.trim().toUpperCase(),
-        });
-      } catch (err) {
-        this.logger.warn(
-          `FISH_RETURN print on ready failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);

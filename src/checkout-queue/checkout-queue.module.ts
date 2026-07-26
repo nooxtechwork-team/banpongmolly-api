@@ -15,7 +15,6 @@ import { PosAuthModule } from '../pos-auth/pos-auth.module';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { CheckoutQueueService } from './checkout-queue.service';
 import { CheckoutQueueGateway } from './checkout-queue.gateway';
-import { CheckoutQueueController } from './checkout-queue.controller';
 import { CheckoutQueueAdminController } from './checkout-queue-admin.controller';
 import { MyCheckoutQueueController } from './checkout-queue-my.controller';
 import { CheckoutBoardController } from './checkout-board.controller';
@@ -39,7 +38,6 @@ import { PosDeviceController } from './pos-device.controller';
     PosAuthModule,
   ],
   controllers: [
-    CheckoutQueueController,
     CheckoutQueueAdminController,
     MyCheckoutQueueController,
     CheckoutBoardController,

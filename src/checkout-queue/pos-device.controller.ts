@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { CheckoutDevice } from '../entities/checkout-device.entity';
 import { PosApiKeyGuard } from '../pos-auth/pos-api-key.guard';
+import { PrintJobService } from '../print-job/print-job.service';
+import { PosPrintReportDto } from '../print-job/dto/print-job.dto';
 import { CheckoutQueueService } from './checkout-queue.service';
 import {
   PosClaimNextDto,
@@ -24,12 +26,15 @@ type PosRequest = { posDevice?: CheckoutDevice };
  * Controller ของเครื่อง POS (Sunmi) เอง — คิวคืนปลาแบบ Pull Queue + Auto Lock
  *
  * Auth: header `X-POS-Api-Key` ตรงกับ `checkout_devices.api_key` ใน DB
- * ไม่ต้องส่ง device_code ก็ได้ — ระบบรู้เครื่องจาก API key
+ * พิมพ์ใบงานบนเครื่อง → รายงานผลด้วย POST /pos/print-report
  */
 @Controller('pos')
 @UseGuards(PosApiKeyGuard)
 export class PosDeviceController {
-  constructor(private readonly checkoutQueueService: CheckoutQueueService) {}
+  constructor(
+    private readonly checkoutQueueService: CheckoutQueueService,
+    private readonly printJobService: PrintJobService,
+  ) {}
 
   /** heartbeat: บอกว่าเครื่องออนไลน์ + ดึงคิวปัจจุบันของเครื่อง */
   @Post('heartbeat')
@@ -54,27 +59,6 @@ export class PosDeviceController {
       activity_id: dto.activity_id,
       staff_name: dto.staff_name,
       staff_user_id: dto.staff_user_id,
-      print: dto.print,
-    });
-  }
-
-  /** เวอร์ชัน GET สำหรับ POS client ที่เรียกง่าย ๆ */
-  @Get('next')
-  next(
-    @Request() req: PosRequest,
-    @Query('device_code') deviceCode?: string,
-    @Query('activity_id') activityId?: string,
-    @Query('staff_name') staffName?: string,
-    @Query('staff_user_id') staffUserId?: string,
-    @Query('print') print?: string,
-  ) {
-    const code = this.resolveDeviceCode(req, deviceCode);
-    return this.checkoutQueueService.claimNext({
-      device_code: code,
-      activity_id: activityId ? Number(activityId) : undefined,
-      staff_name: staffName,
-      staff_user_id: staffUserId ? Number(staffUserId) : undefined,
-      print: print === '1' || print === 'true',
     });
   }
 
@@ -89,7 +73,6 @@ export class PosDeviceController {
       device_code: dto.device_code ?? req.posDevice?.device_code,
       staff_name: dto.staff_name,
       staff_user_id: dto.staff_user_id,
-      print: dto.print,
     });
   }
 
@@ -104,13 +87,39 @@ export class PosDeviceController {
       device_code: dto.device_code ?? req.posDevice?.device_code,
       staff_name: dto.staff_name,
       staff_user_id: dto.staff_user_id,
-      print: dto.print,
     });
   }
 
   /**
-   * รวม device_code จาก body/query หรือจาก API key ของเครื่อง (req.posDevice)
+   * บันทึกผลพิมพ์ local ลง print_jobs
+   * เรียกหลังพิมพ์ใบคืนปลาบนเครื่อง (สำเร็จหรือล้มเหลว)
    */
+  @Post('print-report')
+  async printReport(
+    @Request() req: PosRequest,
+    @Body() dto: PosPrintReportDto,
+  ) {
+    const deviceCode = this.resolveDeviceCode(req, dto.device_code);
+    const ticket = await this.checkoutQueueService.getTicketDetail(
+      dto.ticket_id,
+    );
+    return this.printJobService.recordPosLocalPrint({
+      deviceCode,
+      queueCode: ticket.queue_code,
+      queueNo: ticket.queue_no,
+      applicantName: ticket.applicant_name,
+      staffName: ticket.staff_name,
+      note: ticket.note,
+      items: ticket.items.map((i) => ({
+        entry_code: i.entry_code,
+        package_name: i.package_name,
+        registration_no: i.registration_no,
+      })),
+      status: dto.status,
+      error: dto.error,
+    });
+  }
+
   private resolveDeviceCode(req: PosRequest, provided?: string): string {
     const code = (provided || req.posDevice?.device_code || '').trim();
     if (!code) {

@@ -52,11 +52,6 @@ export class ClaimNextCheckoutQueueDto {
   @IsInt()
   @Min(1)
   activity_id?: number;
-
-  /** สร้าง print job FISH_RETURN ตอน claim */
-  @IsOptional()
-  @IsBoolean()
-  print?: boolean;
 }
 
 export class CheckoutQueueTransitionDto {
@@ -75,10 +70,6 @@ export class CheckoutQueueTransitionDto {
   @IsString()
   @MaxLength(255)
   staff_name?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  print?: boolean;
 }
 
 export class CancelCheckoutTicketDto {
@@ -175,10 +166,6 @@ export class PosClaimNextDto {
   @IsInt()
   @Min(1)
   activity_id?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  print?: boolean;
 }
 
 export class PosTransitionDto {
@@ -197,8 +184,4 @@ export class PosTransitionDto {
   @IsString()
   @MaxLength(255)
   staff_name?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  print?: boolean;
 }

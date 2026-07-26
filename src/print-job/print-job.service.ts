@@ -61,6 +61,57 @@ export class PrintJobService {
     return this.repo.save(job);
   }
 
+  /**
+   * บันทึกผลพิมพ์บนเครื่อง POS (local print) ลง print_jobs
+   * — ได้ทั้งประวัติ และ payload สำหรับ reprint / เครื่องอื่น
+   */
+  async recordPosLocalPrint(opts: {
+    deviceCode: string;
+    queueCode: string;
+    queueNo: number;
+    applicantName: string | null;
+    staffName: string | null;
+    note: string | null;
+    items: Array<{
+      entry_code: string | null;
+      package_name: string | null;
+      registration_no: string | null;
+    }>;
+    status: 'done' | 'failed';
+    error?: string | null;
+  }): Promise<PrintJob> {
+    const deviceCode = opts.deviceCode.trim();
+    if (!deviceCode) throw new BadRequestException('deviceCode is required');
+
+    const payload = this.buildFishReturnSlip({
+      queueCode: opts.queueCode,
+      applicantName: opts.applicantName,
+      staffName: opts.staffName,
+      note: opts.note,
+      items: opts.items,
+    });
+    const now = new Date();
+    const label =
+      `${opts.queueCode} · ${opts.applicantName || ''}`.trim().replace(/·\s*$/, '') ||
+      opts.queueCode;
+
+    const done = opts.status === 'done';
+    const job = this.repo.create({
+      job_type: PrintJobType.FISH_RETURN,
+      status: done ? PrintJobStatus.DONE : PrintJobStatus.FAILED,
+      queue_no: opts.queueNo,
+      payload_text: payload,
+      label,
+      target_device_id: deviceCode,
+      claimed_by_device_id: deviceCode,
+      claimed_at: now,
+      printed_at: done ? now : null,
+      attempts: 1,
+      last_error: done ? null : (opts.error?.trim() || 'print failed'),
+    });
+    return this.repo.save(job);
+  }
+
   async listRecent(limit = 30): Promise<PrintJob[]> {
     return this.repo.find({
       order: { id: 'DESC' },
@@ -208,6 +259,64 @@ export class PrintJobService {
     }
     lines.push(`เวลา ${when}`);
     lines.push('กรุณารอเรียกคิว');
+    lines.push('================================');
+    lines.push('');
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  /** ข้อความใบคืนปลา (ให้ตรงแนว slip บน Sunmi) */
+  buildFishReturnSlip(opts: {
+    queueCode: string;
+    applicantName: string | null;
+    staffName: string | null;
+    note: string | null;
+    items: Array<{
+      entry_code: string | null;
+      package_name: string | null;
+      registration_no: string | null;
+    }>;
+  }): string {
+    const when = new Date().toLocaleString('th-TH', { hour12: false });
+    const code = (opts.queueCode || '').trim() || '-';
+    const customer = (opts.applicantName || '').trim() || '-';
+    const staff = (opts.staffName || '').trim() || '-';
+    const lines: string[] = [
+      'Banpong Molly',
+      'ใบคืนปลา',
+      '--------------------------------',
+      'หมายเลขคิว',
+      code,
+      '--------------------------------',
+      'รายการโหลปลา (entry_code)',
+      '--------------------------------',
+    ];
+    if (!opts.items.length) {
+      lines.push('  (ไม่มีรายการ)');
+    } else {
+      opts.items.forEach((it, i) => {
+        lines.push(`${i + 1}. ${it.entry_code || '-'}`);
+        const detailParts: string[] = [];
+        if (it.package_name) detailParts.push(it.package_name);
+        if (it.registration_no) detailParts.push(it.registration_no);
+        if (detailParts.length) lines.push(`   ${detailParts.join(' · ')}`);
+      });
+    }
+    lines.push('--------------------------------');
+    lines.push(`รวม ${opts.items.length} รายการ`);
+    if (opts.note) lines.push(`หมายเหตุ: ${opts.note}`);
+    lines.push('--------------------------------');
+    lines.push('');
+    lines.push('ลูกค้า / Customer');
+    lines.push(customer);
+    lines.push('ลายเซ็น: ____________________');
+    lines.push('');
+    lines.push('พนักงาน / Staff');
+    lines.push(staff);
+    lines.push('ลายเซ็น: ____________________');
+    lines.push('--------------------------------');
+    lines.push(`เวลา ${when}`);
+    lines.push('ขอบคุณครับ');
     lines.push('================================');
     lines.push('');
     lines.push('');
