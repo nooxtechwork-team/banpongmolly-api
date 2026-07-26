@@ -46,12 +46,17 @@ export class ClaimNextCheckoutQueueDto {
   @MaxLength(255)
   staff_name?: string;
 
-  /** บังคับ activity เมื่อ device ไม่ผูก activity */
+  /** กรอง activity เมื่อต้องการ (ไม่ส่งและเครื่องไม่ผูก = ใช้ activity ของเครื่อง) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   activity_id?: number;
+
+  /** สร้าง print job FISH_RETURN ตอน claim */
+  @IsOptional()
+  @IsBoolean()
+  print?: boolean;
 }
 
 export class CheckoutQueueTransitionDto {
@@ -70,6 +75,10 @@ export class CheckoutQueueTransitionDto {
   @IsString()
   @MaxLength(255)
   staff_name?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  print?: boolean;
 }
 
 export class CancelCheckoutTicketDto {
@@ -166,6 +175,10 @@ export class PosClaimNextDto {
   @IsInt()
   @Min(1)
   activity_id?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  print?: boolean;
 }
 
 export class PosTransitionDto {
@@ -184,4 +197,8 @@ export class PosTransitionDto {
   @IsString()
   @MaxLength(255)
   staff_name?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  print?: boolean;
 }
