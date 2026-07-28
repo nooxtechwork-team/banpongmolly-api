@@ -16,12 +16,23 @@ export type CheckoutBoardPayload = {
     preparing: number;
     ready: number;
     complete: number;
+    cancelled: number;
   };
   devices: Array<{
+    id: number;
     code: string;
     name: string;
     status: string;
+    is_active: boolean;
     queue_code: string | null;
+    ticket_id: number | null;
+    ticket_status: string | null;
+    staff_name: string | null;
+    /** จำนวนปลาในใบที่เครื่องกำลังทำ */
+    items_count: number;
+    /** เวลาที่เริ่มทำใบนี้ (preparing_at) */
+    started_at: string | null;
+    last_heartbeat_ms: number | null;
   }>;
 };
 

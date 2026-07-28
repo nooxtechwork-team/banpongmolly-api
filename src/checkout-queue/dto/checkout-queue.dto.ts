@@ -88,6 +88,15 @@ export class CancelCheckoutTicketDto {
   reason?: string;
 }
 
+/** Admin กดปิดคิวแทนพนักงาน (force complete) */
+export class AdminCompleteCheckoutTicketDto {
+  /** หมายเหตุ — จะถูกบันทึกลง checkout_remark ของปลาทุกตัวในใบ */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  remark?: string;
+}
+
 export class UpsertCheckoutDeviceDto {
   @IsString()
   @MaxLength(64)
