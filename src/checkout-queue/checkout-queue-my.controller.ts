@@ -38,6 +38,18 @@ export class MyCheckoutQueueController {
     );
   }
 
+  /** ปลาของฉันทั้งหมดสำหรับหน้า dashboard คืนปลา — ต้องมาก่อน @Get(':id') */
+  @Get('entries')
+  listEntries(
+    @Request() req: { user: User },
+    @Query('activity_id') activityId?: string,
+  ) {
+    return this.checkoutQueueService.listMyCheckoutEntries(
+      req.user.id,
+      activityId ? Number(activityId) : undefined,
+    );
+  }
+
   @Get(':id')
   getOne(
     @Request() req: { user: User },
