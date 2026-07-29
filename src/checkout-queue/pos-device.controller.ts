@@ -104,7 +104,7 @@ export class PosDeviceController {
     });
   }
 
-  /** ปฏิเสธ / คืนคิวกลับรอ (preparing|ready → waiting) — ปล่อย device */
+  /** ปฏิเสธคิว (preparing|ready → cancelled) — ลูกค้าต้องสร้างคิวใหม่ */
   @Post('queue/:queueCode/release')
   release(
     @Request() req: PosRequest,

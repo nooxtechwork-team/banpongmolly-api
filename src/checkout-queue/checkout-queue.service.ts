@@ -822,10 +822,13 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   /**
    * แจกคิว waiting ให้เครื่อง idle ที่ออนไลน์ (โหลดน้อยสุดก่อน) จนไม่มีคิวหรือไม่มีเครื่องว่าง
    */
-  async dispatch(activityId: number): Promise<number> {
+  async dispatch(
+    activityId: number,
+    options?: { excludeDeviceId?: number | null },
+  ): Promise<number> {
     let assigned = 0;
     while (assigned < CheckoutQueueService.DISPATCH_MAX_PER_CALL) {
-      const ticketId = await this.dispatchOne(activityId);
+      const ticketId = await this.dispatchOne(activityId, options?.excludeDeviceId);
       if (ticketId == null) break;
       assigned += 1;
       const detail = await this.getTicketDetail(ticketId);
@@ -838,9 +841,12 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     return assigned;
   }
 
-  private async dispatchAfter(activityId: number): Promise<void> {
+  private async dispatchAfter(
+    activityId: number,
+    excludeDeviceId?: number | null,
+  ): Promise<void> {
     try {
-      await this.dispatch(activityId);
+      await this.dispatch(activityId, { excludeDeviceId });
     } catch (err) {
       this.logger.warn(
         `dispatch(${activityId}) failed: ${
@@ -851,7 +857,10 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** จับคู่หนึ่งคิวรอ + หนึ่งเครื่องว่าง (transaction + lock) */
-  private async dispatchOne(activityId: number): Promise<number | null> {
+  private async dispatchOne(
+    activityId: number,
+    excludeDeviceId?: number | null,
+  ): Promise<number | null> {
     const settings = await this.getRuntimeSettings();
     const onlineSinceMs = Date.now() - settings.device_offline_ms;
     const queueDate = this.toQueueDate(new Date());
@@ -871,6 +880,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           AND d.current_ticket_id IS NULL
           AND d.last_heartbeat_ms IS NOT NULL
           AND CAST(d.last_heartbeat_ms AS UNSIGNED) >= ?
+          AND (? IS NULL OR d.id != ?)
         ORDER BY (
           SELECT COUNT(*)
           FROM checkout_tickets t
@@ -885,6 +895,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           activityId,
           CheckoutDeviceStatus.ONLINE_IDLE,
           onlineSinceMs,
+          excludeDeviceId ?? null,
+          excludeDeviceId ?? null,
           queueDate,
           CheckoutTicketStatus.COMPLETE,
           CheckoutTicketStatus.READY,
@@ -918,6 +930,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         SELECT t.id
         FROM checkout_tickets t
         WHERE t.activity_id = ?
+          AND t.queue_date = ?
           AND t.status = ?
           AND t.device_id IS NULL
           AND (t.released_by_device_id IS NULL OR t.released_by_device_id != ?)
@@ -925,7 +938,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         LIMIT 1
         FOR UPDATE SKIP LOCKED
         `,
-        [activityId, CheckoutTicketStatus.WAITING, device.id],
+        [activityId, queueDate, CheckoutTicketStatus.WAITING, device.id],
       );
 
       if (!waitingRows?.length) return null;
@@ -1026,6 +1039,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
+      const queueDate = this.toQueueDate(new Date());
+
       if (
         device.current_ticket_id != null &&
         device.status === CheckoutDeviceStatus.ONLINE_BUSY
@@ -1033,8 +1048,13 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         const current = await ticketRepo.findOne({
           where: { id: device.current_ticket_id },
         });
+        const currentDate = current
+          ? this.normalizeQueueDate(current.queue_date)
+          : null;
+        const isToday = currentDate === queueDate;
         if (
           current &&
+          isToday &&
           (current.status === CheckoutTicketStatus.PREPARING ||
             current.status === CheckoutTicketStatus.READY)
         ) {
@@ -1042,11 +1062,25 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             `เครื่องนี้กำลังทำคิว ${current.queue_code} อยู่`,
           );
         }
+        // คิวค้างข้ามวันบนเครื่อง → ปลดก่อนรับคิววันนี้
+        if (current && !isToday) {
+          current.status = CheckoutTicketStatus.WAITING;
+          current.device_id = null;
+          current.released_by_device_id = device.id;
+          current.staff_user_id = null;
+          current.staff_name = null;
+          current.preparing_at = null;
+          current.ready_at = null;
+          await ticketRepo.save(current);
+          device.current_ticket_id = null;
+          device.status = CheckoutDeviceStatus.ONLINE_IDLE;
+        }
       }
 
       const waiting = await ticketRepo
         .createQueryBuilder('t')
         .where('t.activity_id = :activityId', { activityId })
+        .andWhere('t.queue_date = :queueDate', { queueDate })
         .andWhere('t.status = :status', {
           status: CheckoutTicketStatus.WAITING,
         })
@@ -1138,7 +1172,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     dto: CheckoutQueueTransitionDto,
   ): Promise<CheckoutTicketDetail> {
     const code = queueCode.trim().toUpperCase();
-    const ticket = await this.requireTicketByCode(code);
+    const ticket = await this.requireTicketByCode(code, dto.device_code);
 
     await this.dataSource.transaction(async (manager) => {
       const ticketRepo = manager.getRepository(CheckoutTicket);
@@ -1202,15 +1236,18 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     return detail;
   }
 
-  /** ปฏิเสธ / คืนคิวกลับคิวรอ (preparing|ready → waiting) — ปล่อยเครื่อง */
+  /**
+   * ปฏิเสธคิวจาก POS (preparing|ready → cancelled)
+   * คิวนี้จบแล้ว — ลูกค้าต้องสร้างคิวใหม่เอง ไม่กลับเข้าคิวรอ
+   */
   async releaseTicketFromPos(
     queueCode: string,
     dto: CheckoutQueueTransitionDto,
   ): Promise<CheckoutTicketDetail> {
     const code = queueCode.trim().toUpperCase();
-    const ticket = await this.requireTicketByCode(code);
+    const ticket = await this.requireTicketByCode(code, dto.device_code);
 
-    await this.dataSource.transaction(async (manager) => {
+    const activityId = await this.dataSource.transaction(async (manager) => {
       const ticketRepo = manager.getRepository(CheckoutTicket);
       const deviceRepo = manager.getRepository(CheckoutDevice);
       const eventRepo = manager.getRepository(CheckoutTicketEvent);
@@ -1223,8 +1260,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       });
       if (!locked) throw new NotFoundException('ไม่พบคิว');
 
-      // idempotent: คิวถูกคืนแล้ว → ปลดเครื่องที่ยังถือ current_ticket ค้าง
-      if (locked.status === CheckoutTicketStatus.WAITING) {
+      // idempotent: ถูกยกเลิกแล้ว → ปลดเครื่องที่ยังถือ current_ticket ค้าง
+      if (locked.status === CheckoutTicketStatus.CANCELLED) {
         const deviceCode = dto.device_code?.trim().toUpperCase();
         if (deviceCode) {
           const device = await deviceRepo.findOne({
@@ -1238,7 +1275,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             await deviceRepo.save(device);
           }
         }
-        return;
+        return locked.activity_id;
       }
 
       if (
@@ -1246,7 +1283,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         locked.status !== CheckoutTicketStatus.READY
       ) {
         throw new BadRequestException(
-          `release ได้จาก preparing/ready เท่านั้น (ตอนนี้: ${locked.status})`,
+          `ปฏิเสธได้จาก preparing/ready เท่านั้น (ตอนนี้: ${locked.status})`,
         );
       }
 
@@ -1267,14 +1304,17 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       }
 
       const fromStatus = locked.status;
-      const releasedByDeviceId = device?.id ?? locked.device_id;
-      locked.status = CheckoutTicketStatus.WAITING;
+      const now = new Date();
+      const deviceId = device?.id ?? locked.device_id;
+      locked.status = CheckoutTicketStatus.CANCELLED;
       locked.device_id = null;
-      locked.released_by_device_id = releasedByDeviceId;
+      locked.released_by_device_id = deviceId;
       locked.staff_user_id = null;
-      locked.staff_name = null;
+      locked.staff_name = dto.staff_name?.trim() || locked.staff_name;
       locked.preparing_at = null;
       locked.ready_at = null;
+      locked.cancel_reason = 'pos_reject';
+      locked.cancelled_at = now;
       await ticketRepo.save(locked);
 
       const items = await itemRepo.find({ where: { ticket_id: locked.id } });
@@ -1291,7 +1331,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       if (device) {
         device.status = CheckoutDeviceStatus.ONLINE_IDLE;
         device.current_ticket_id = null;
-        this.touchDeviceHeartbeat(device, new Date());
+        this.touchDeviceHeartbeat(device, now);
         await deviceRepo.save(device);
       }
 
@@ -1299,20 +1339,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         eventRepo.create({
           ticket_id: locked.id,
           from_status: fromStatus,
-          to_status: CheckoutTicketStatus.WAITING,
+          to_status: CheckoutTicketStatus.CANCELLED,
           actor_user_id: dto.staff_user_id ?? null,
           device_id: device?.id ?? null,
           meta_json: JSON.stringify({
-            reason: 'pos_release',
+            reason: 'pos_reject',
             staff_name: dto.staff_name?.trim() || null,
           }),
         }),
       );
+      return locked.activity_id;
     });
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);
-    await this.dispatchAfter(ticket.activity_id);
+    // แจกคิวถัดไปให้เครื่องว่าง — คิวที่ปฏิเสธถูก cancelled แล้วจะไม่ถูกดึงกลับ
+    await this.dispatchAfter(activityId);
     return detail;
   }
 
@@ -1321,7 +1363,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     dto: CheckoutQueueTransitionDto,
   ): Promise<CheckoutTicketDetail> {
     const code = queueCode.trim().toUpperCase();
-    const ticket = await this.requireTicketByCode(code);
+    const ticket = await this.requireTicketByCode(code, dto.device_code);
 
     await this.dataSource.transaction(async (manager) => {
       const ticketRepo = manager.getRepository(CheckoutTicket);
@@ -1582,13 +1624,40 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // คิวหลุดสถานะ / ไม่ผูกเครื่องนี้แล้ว → เคลียร์ current บนเครื่อง
+      const today = this.toQueueDate(now);
+      const currentDate =
+        current != null ? this.normalizeQueueDate(current.queue_date) : null;
+      const staleCrossDay =
+        current != null && currentDate != null && currentDate !== today;
+
+      // คิวหลุดสถานะ / ไม่ผูกเครื่องนี้แล้ว / ค้างข้ามวัน → เคลียร์ current บนเครื่อง
       if (
         current == null ||
+        staleCrossDay ||
         (current.status !== CheckoutTicketStatus.PREPARING &&
           current.status !== CheckoutTicketStatus.READY) ||
         (current.device_id != null && current.device_id !== device.id)
       ) {
+        if (staleCrossDay && device.current_ticket_id != null) {
+          // คิว ready/preparing ของวันก่อนค้างบนเครื่อง — ปล่อยกลับ waiting
+          // (บอร์ดวันนี้ไม่นับอยู่แล้ว แต่ POS ยังโชว์/กดปุ่มไม่ได้)
+          const staleId = device.current_ticket_id;
+          await this.ticketRepo.update(
+            { id: staleId },
+            {
+              status: CheckoutTicketStatus.WAITING,
+              device_id: null,
+              released_by_device_id: device.id,
+              staff_user_id: null,
+              staff_name: null,
+              preparing_at: null,
+              ready_at: null,
+            },
+          );
+          this.logger.warn(
+            `heartbeat cleared cross-day ticket #${staleId} (${current?.queue_code}) from device ${device.device_code}`,
+          );
+        }
         device.status = CheckoutDeviceStatus.ONLINE_IDLE;
         device.current_ticket_id = null;
         await this.deviceRepo.save(device);
@@ -1632,6 +1701,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (resolvedActivityId != null) {
+      // อย่าแจกคิวที่เครื่องนี้เพิ่ง reject กลับมาทันที (ใช้ released_by ใน SQL)
+      // และไม่ต้อง exclude device ทั้งเครื่อง — เครื่องว่างควรได้คิวอื่นได้
       void this.dispatchAfter(resolvedActivityId);
     }
 
@@ -1652,9 +1723,11 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     queue_no: number;
     applicant_name: string | null;
   } | null> {
+    const queueDate = this.toQueueDate(new Date());
     const qb = this.ticketRepo
       .createQueryBuilder('t')
       .where('t.activity_id = :activityId', { activityId })
+      .andWhere('t.queue_date = :queueDate', { queueDate })
       .andWhere('t.status = :status', { status: CheckoutTicketStatus.WAITING })
       .orderBy('t.queue_no', 'ASC')
       .take(1);
@@ -1694,7 +1767,12 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       where: { device_code: code },
     });
     if (!device?.current_ticket_id) return null;
-    return this.getTicketDetail(device.current_ticket_id);
+    const detail = await this.getTicketDetail(device.current_ticket_id);
+    const today = this.toQueueDate(new Date());
+    if (this.normalizeQueueDate(detail.queue_date) !== today) {
+      return null;
+    }
+    return detail;
   }
 
   // ─── Board (head dashboard) ────────────────────────────────────────
@@ -2303,19 +2381,43 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     return ticket;
   }
 
-  private async requireTicketByCode(queueCode: string): Promise<CheckoutTicket> {
+  /**
+   * หาคิวจาก queue_code
+   * ถ้ามี device_code และเครื่องถือคิวรหัสเดียวกันอยู่ → ใช้คิวนั้นก่อน
+   * (กันเคส A001 วันก่อนค้างบนเครื่อง แต่ A001 วันนี้ถูก resolve แทน)
+   */
+  private async requireTicketByCode(
+    queueCode: string,
+    deviceCode?: string | null,
+  ): Promise<CheckoutTicket> {
+    const code = queueCode.trim().toUpperCase();
+
+    if (deviceCode?.trim()) {
+      const device = await this.deviceRepo.findOne({
+        where: { device_code: deviceCode.trim().toUpperCase() },
+      });
+      if (device?.current_ticket_id != null) {
+        const held = await this.ticketRepo.findOne({
+          where: { id: device.current_ticket_id },
+        });
+        if (held && held.queue_code === code) {
+          return held;
+        }
+      }
+    }
+
     const today = this.toQueueDate(new Date());
     const todayTicket = await this.ticketRepo.findOne({
-      where: { queue_code: queueCode, queue_date: today },
+      where: { queue_code: code, queue_date: today },
       order: { id: 'DESC' },
     });
     if (todayTicket) return todayTicket;
 
     const ticket = await this.ticketRepo.findOne({
-      where: { queue_code: queueCode },
+      where: { queue_code: code },
       order: { id: 'DESC' },
     });
-    if (!ticket) throw new NotFoundException(`ไม่พบคิว ${queueCode}`);
+    if (!ticket) throw new NotFoundException(`ไม่พบคิว ${code}`);
     return ticket;
   }
 }
