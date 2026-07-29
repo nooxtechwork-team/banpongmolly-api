@@ -542,6 +542,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         queue_code: queueCode,
         status: CheckoutTicketStatus.WAITING,
         device_id: null,
+        released_by_device_id: null,
         staff_user_id: null,
         staff_name: null,
         note: dto.note?.trim() || null,
@@ -859,8 +860,6 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       const deviceRepo = manager.getRepository(CheckoutDevice);
       const ticketRepo = manager.getRepository(CheckoutTicket);
       const eventRepo = manager.getRepository(CheckoutTicketEvent);
-      const itemRepo = manager.getRepository(CheckoutTicketItem);
-      const entryRepo = manager.getRepository(ActivityRegistrationEntry);
 
       const deviceRows: Array<{ id: number }> = await deviceRepo.query(
         `
@@ -921,11 +920,12 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         WHERE t.activity_id = ?
           AND t.status = ?
           AND t.device_id IS NULL
+          AND (t.released_by_device_id IS NULL OR t.released_by_device_id != ?)
         ORDER BY t.queue_no ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
         `,
-        [activityId, CheckoutTicketStatus.WAITING],
+        [activityId, CheckoutTicketStatus.WAITING, device.id],
       );
 
       if (!waitingRows?.length) return null;
@@ -941,24 +941,20 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       ) {
         return null;
       }
+      if (
+        waiting.released_by_device_id != null &&
+        waiting.released_by_device_id === device.id
+      ) {
+        return null;
+      }
 
       const now = new Date();
       waiting.device_id = device.id;
-      waiting.status = CheckoutTicketStatus.READY;
+      waiting.released_by_device_id = null;
+      waiting.status = CheckoutTicketStatus.PREPARING;
       waiting.preparing_at = now;
-      waiting.ready_at = now;
+      waiting.ready_at = null;
       await ticketRepo.save(waiting);
-
-      const items = await itemRepo.find({ where: { ticket_id: waiting.id } });
-      if (items.length) {
-        const entries = await entryRepo.find({
-          where: { id: In(items.map((i) => i.entry_id)) },
-        });
-        for (const entry of entries) {
-          entry.ready_to_checkout = true;
-        }
-        await entryRepo.save(entries);
-      }
 
       device.status = CheckoutDeviceStatus.ONLINE_BUSY;
       device.current_ticket_id = waiting.id;
@@ -969,7 +965,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         eventRepo.create({
           ticket_id: waiting.id,
           from_status: CheckoutTicketStatus.WAITING,
-          to_status: CheckoutTicketStatus.READY,
+          to_status: CheckoutTicketStatus.PREPARING,
           actor_user_id: null,
           device_id: device.id,
           meta_json: JSON.stringify({
@@ -1252,8 +1248,10 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       }
 
       const fromStatus = locked.status;
+      const releasedByDeviceId = device?.id ?? locked.device_id;
       locked.status = CheckoutTicketStatus.WAITING;
       locked.device_id = null;
+      locked.released_by_device_id = releasedByDeviceId;
       locked.staff_user_id = null;
       locked.staff_name = null;
       locked.preparing_at = null;
@@ -1595,7 +1593,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         ready: payload.counts.ready,
         complete: payload.counts.complete,
       };
-      nextWaiting = await this.peekNextWaiting(resolvedActivityId);
+      nextWaiting = await this.peekNextWaiting(resolvedActivityId, device.id);
     }
 
     if (resolvedActivityId != null) {
@@ -1611,18 +1609,27 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Peek oldest waiting ticket without locking (for POS UI preview). */
-  async peekNextWaiting(activityId: number): Promise<{
+  async peekNextWaiting(
+    activityId: number,
+    excludeDeviceId?: number | null,
+  ): Promise<{
     queue_code: string;
     queue_no: number;
     applicant_name: string | null;
   } | null> {
-    const waiting = await this.ticketRepo.findOne({
-      where: {
-        activity_id: activityId,
-        status: CheckoutTicketStatus.WAITING,
-      },
-      order: { queue_no: 'ASC' },
-    });
+    const qb = this.ticketRepo
+      .createQueryBuilder('t')
+      .where('t.activity_id = :activityId', { activityId })
+      .andWhere('t.status = :status', { status: CheckoutTicketStatus.WAITING })
+      .orderBy('t.queue_no', 'ASC')
+      .take(1);
+    if (excludeDeviceId != null) {
+      qb.andWhere(
+        '(t.released_by_device_id IS NULL OR t.released_by_device_id != :excludeDeviceId)',
+        { excludeDeviceId },
+      );
+    }
+    const waiting = await qb.getOne();
     if (!waiting) return null;
 
     const firstItem = await this.itemRepo.findOne({
@@ -2034,6 +2041,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             const fromStatus = ticket.status;
             ticket.status = CheckoutTicketStatus.WAITING;
             ticket.device_id = null;
+            ticket.released_by_device_id = locked.id;
             ticket.staff_user_id = null;
             ticket.staff_name = null;
             ticket.preparing_at = null;

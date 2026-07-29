@@ -54,6 +54,9 @@ export class CheckoutTicket {
   device_id: number | null;
 
   @Column({ type: 'int', nullable: true })
+  released_by_device_id: number | null;
+
+  @Column({ type: 'int', nullable: true })
   staff_user_id: number | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
