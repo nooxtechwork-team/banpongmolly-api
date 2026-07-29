@@ -62,6 +62,20 @@ export class PosDeviceController {
     });
   }
 
+  /**
+   * รับคิวแล้วข้าม preparing — waiting → ready ในครั้งเดียว (ผูก device ตอนเครื่องกดรับ)
+   */
+  @Post('claim-next-ready')
+  claimNextReady(@Request() req: PosRequest, @Body() dto: PosClaimNextDto) {
+    const deviceCode = this.resolveDeviceCode(req, dto.device_code);
+    return this.checkoutQueueService.claimNextReady({
+      device_code: deviceCode,
+      activity_id: dto.activity_id,
+      staff_name: dto.staff_name,
+      staff_user_id: dto.staff_user_id,
+    });
+  }
+
   /** กด "พร้อมรับปลา" (preparing → ready) */
   @Post('queue/:queueCode/ready')
   ready(
@@ -84,6 +98,20 @@ export class PosDeviceController {
     @Body() dto: PosTransitionDto,
   ) {
     return this.checkoutQueueService.complete(queueCode, {
+      device_code: dto.device_code ?? req.posDevice?.device_code,
+      staff_name: dto.staff_name,
+      staff_user_id: dto.staff_user_id,
+    });
+  }
+
+  /** ปฏิเสธ / คืนคิวกลับรอ (preparing|ready → waiting) — ปล่อย device */
+  @Post('queue/:queueCode/release')
+  release(
+    @Request() req: PosRequest,
+    @Param('queueCode') queueCode: string,
+    @Body() dto: PosTransitionDto,
+  ) {
+    return this.checkoutQueueService.releaseTicketFromPos(queueCode, {
       device_code: dto.device_code ?? req.posDevice?.device_code,
       staff_name: dto.staff_name,
       staff_user_id: dto.staff_user_id,

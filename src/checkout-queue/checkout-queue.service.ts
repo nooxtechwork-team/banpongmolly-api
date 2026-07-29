@@ -491,6 +491,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);
+    await this.dispatchAfter(dto.activity_id);
     return detail;
   }
 
@@ -711,10 +712,195 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     return { activities, entries, counts };
   }
 
+  // ─── Auto dispatch (เซิร์ฟเวอร์แจกคิว — ไม่ให้แอป claim เอง) ─────────
+
+  private static readonly DISPATCH_MAX_PER_CALL = 64;
+
+  /**
+   * แจกคิว waiting ให้เครื่อง idle ที่ออนไลน์ (โหลดน้อยสุดก่อน) จนไม่มีคิวหรือไม่มีเครื่องว่าง
+   */
+  async dispatch(activityId: number): Promise<number> {
+    let assigned = 0;
+    while (assigned < CheckoutQueueService.DISPATCH_MAX_PER_CALL) {
+      const ticketId = await this.dispatchOne(activityId);
+      if (ticketId == null) break;
+      assigned += 1;
+      const detail = await this.getTicketDetail(ticketId);
+      await this.emitLive(detail);
+    }
+    if (assigned > 0) {
+      const board = await this.getBoard(activityId);
+      this.gateway.emitBoardUpdated(activityId, board);
+    }
+    return assigned;
+  }
+
+  private async dispatchAfter(activityId: number): Promise<void> {
+    try {
+      await this.dispatch(activityId);
+    } catch (err) {
+      this.logger.warn(
+        `dispatch(${activityId}) failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /** จับคู่หนึ่งคิวรอ + หนึ่งเครื่องว่าง (transaction + lock) */
+  private async dispatchOne(activityId: number): Promise<number | null> {
+    const onlineSinceMs = Date.now() - DEVICE_OFFLINE_MS;
+    const queueDate = this.toQueueDate(new Date());
+
+    return this.dataSource.transaction(async (manager) => {
+      const deviceRepo = manager.getRepository(CheckoutDevice);
+      const ticketRepo = manager.getRepository(CheckoutTicket);
+      const eventRepo = manager.getRepository(CheckoutTicketEvent);
+      const itemRepo = manager.getRepository(CheckoutTicketItem);
+      const entryRepo = manager.getRepository(ActivityRegistrationEntry);
+
+      const deviceRows: Array<{ id: number }> = await deviceRepo.query(
+        `
+        SELECT d.id
+        FROM checkout_devices d
+        WHERE d.activity_id = ?
+          AND d.is_active = 1
+          AND d.status = ?
+          AND d.current_ticket_id IS NULL
+          AND d.last_heartbeat_ms IS NOT NULL
+          AND CAST(d.last_heartbeat_ms AS UNSIGNED) >= ?
+        ORDER BY (
+          SELECT COUNT(*)
+          FROM checkout_tickets t
+          WHERE t.device_id = d.id
+            AND t.queue_date = ?
+            AND t.status IN (?, ?, ?)
+        ) ASC, d.id ASC
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [
+          activityId,
+          CheckoutDeviceStatus.ONLINE_IDLE,
+          onlineSinceMs,
+          queueDate,
+          CheckoutTicketStatus.COMPLETE,
+          CheckoutTicketStatus.READY,
+          CheckoutTicketStatus.PREPARING,
+        ],
+      );
+
+      if (!deviceRows?.length) return null;
+
+      const device = await deviceRepo.findOne({
+        where: { id: Number(deviceRows[0].id) },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !device ||
+        !device.is_active ||
+        device.activity_id !== activityId ||
+        device.status !== CheckoutDeviceStatus.ONLINE_IDLE ||
+        device.current_ticket_id != null
+      ) {
+        return null;
+      }
+
+      const hbMs = this.deviceHeartbeatMs(device);
+      if (hbMs == null || hbMs < onlineSinceMs) {
+        return null;
+      }
+
+      const waitingRows: Array<{ id: number }> = await ticketRepo.query(
+        `
+        SELECT t.id
+        FROM checkout_tickets t
+        WHERE t.activity_id = ?
+          AND t.status = ?
+          AND t.device_id IS NULL
+        ORDER BY t.queue_no ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+        `,
+        [activityId, CheckoutTicketStatus.WAITING],
+      );
+
+      if (!waitingRows?.length) return null;
+
+      const waiting = await ticketRepo.findOne({
+        where: { id: Number(waitingRows[0].id) },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !waiting ||
+        waiting.status !== CheckoutTicketStatus.WAITING ||
+        waiting.device_id != null
+      ) {
+        return null;
+      }
+
+      const now = new Date();
+      waiting.device_id = device.id;
+      waiting.status = CheckoutTicketStatus.READY;
+      waiting.preparing_at = now;
+      waiting.ready_at = now;
+      await ticketRepo.save(waiting);
+
+      const items = await itemRepo.find({ where: { ticket_id: waiting.id } });
+      if (items.length) {
+        const entries = await entryRepo.find({
+          where: { id: In(items.map((i) => i.entry_id)) },
+        });
+        for (const entry of entries) {
+          entry.ready_to_checkout = true;
+        }
+        await entryRepo.save(entries);
+      }
+
+      device.status = CheckoutDeviceStatus.ONLINE_BUSY;
+      device.current_ticket_id = waiting.id;
+      this.touchDeviceHeartbeat(device, now);
+      await deviceRepo.save(device);
+
+      await eventRepo.save(
+        eventRepo.create({
+          ticket_id: waiting.id,
+          from_status: CheckoutTicketStatus.WAITING,
+          to_status: CheckoutTicketStatus.READY,
+          actor_user_id: null,
+          device_id: device.id,
+          meta_json: JSON.stringify({
+            auto_dispatch: true,
+            device_code: device.device_code,
+          }),
+        }),
+      );
+
+      return waiting.id;
+    });
+  }
+
   // ─── POS: claim / ready / complete / heartbeat ─────────────────────
 
   async claimNext(
     dto: ClaimNextCheckoutQueueDto,
+  ): Promise<CheckoutTicketDetail | null> {
+    return this.claimNextInternal(dto, { skipToReady: false });
+  }
+
+  /**
+   * รับคิวแล้วตั้งเป็นพร้อมรับทันที (ข้าม preparing บน UI)
+   * ยังผูก device ตอนเครื่องกดรับ — ไม่ผูกตอนผู้ใช้สร้างคิว
+   */
+  async claimNextReady(
+    dto: ClaimNextCheckoutQueueDto,
+  ): Promise<CheckoutTicketDetail | null> {
+    return this.claimNextInternal(dto, { skipToReady: true });
+  }
+
+  private async claimNextInternal(
+    dto: ClaimNextCheckoutQueueDto,
+    options: { skipToReady: boolean },
   ): Promise<CheckoutTicketDetail | null> {
     const deviceCode = dto.device_code.trim().toUpperCase();
     if (!deviceCode) throw new BadRequestException('device_code is required');
@@ -723,6 +909,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       const deviceRepo = manager.getRepository(CheckoutDevice);
       const ticketRepo = manager.getRepository(CheckoutTicket);
       const eventRepo = manager.getRepository(CheckoutTicketEvent);
+      const itemRepo = manager.getRepository(CheckoutTicketItem);
+      const entryRepo = manager.getRepository(ActivityRegistrationEntry);
 
       const device = await deviceRepo.findOne({
         where: { device_code: deviceCode },
@@ -763,6 +951,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         .andWhere('t.status = :status', {
           status: CheckoutTicketStatus.WAITING,
         })
+        .andWhere('t.device_id IS NULL')
         .orderBy('t.queue_no', 'ASC')
         .setLock('pessimistic_write')
         .take(1)
@@ -781,27 +970,59 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       const staffName = dto.staff_name?.trim() || null;
       const staffUserId = dto.staff_user_id ?? null;
 
-      waiting.status = CheckoutTicketStatus.PREPARING;
       waiting.device_id = device.id;
       waiting.staff_user_id = staffUserId;
       waiting.staff_name = staffName;
       waiting.preparing_at = now;
+
+      if (options.skipToReady) {
+        waiting.status = CheckoutTicketStatus.READY;
+        waiting.ready_at = now;
+
+        const items = await itemRepo.find({ where: { ticket_id: waiting.id } });
+        if (items.length) {
+          const entries = await entryRepo.find({
+            where: { id: In(items.map((i) => i.entry_id)) },
+          });
+          for (const entry of entries) {
+            entry.ready_to_checkout = true;
+          }
+          await entryRepo.save(entries);
+        }
+
+        await eventRepo.save(
+          eventRepo.create({
+            ticket_id: waiting.id,
+            from_status: CheckoutTicketStatus.WAITING,
+            to_status: CheckoutTicketStatus.READY,
+            actor_user_id: staffUserId,
+            device_id: device.id,
+            meta_json: JSON.stringify({
+              device_code: deviceCode,
+              skip_prepare: true,
+            }),
+          }),
+        );
+      } else {
+        waiting.status = CheckoutTicketStatus.PREPARING;
+        waiting.ready_at = null;
+        await eventRepo.save(
+          eventRepo.create({
+            ticket_id: waiting.id,
+            from_status: CheckoutTicketStatus.WAITING,
+            to_status: CheckoutTicketStatus.PREPARING,
+            actor_user_id: staffUserId,
+            device_id: device.id,
+            meta_json: JSON.stringify({ device_code: deviceCode }),
+          }),
+        );
+      }
+
       await ticketRepo.save(waiting);
 
       device.status = CheckoutDeviceStatus.ONLINE_BUSY;
       device.current_ticket_id = waiting.id;
       await deviceRepo.save(device);
-
-      await eventRepo.save(
-        eventRepo.create({
-          ticket_id: waiting.id,
-          from_status: CheckoutTicketStatus.WAITING,
-          to_status: CheckoutTicketStatus.PREPARING,
-          actor_user_id: staffUserId,
-          device_id: device.id,
-          meta_json: JSON.stringify({ device_code: deviceCode }),
-        }),
-      );
 
       return { ticketId: waiting.id, activityId, deviceCode };
     });
@@ -879,6 +1100,99 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);
+    return detail;
+  }
+
+  /** ปฏิเสธ / คืนคิวกลับคิวรอ (preparing|ready → waiting) — ปล่อยเครื่อง */
+  async releaseTicketFromPos(
+    queueCode: string,
+    dto: CheckoutQueueTransitionDto,
+  ): Promise<CheckoutTicketDetail> {
+    const code = queueCode.trim().toUpperCase();
+    const ticket = await this.requireTicketByCode(code);
+
+    await this.dataSource.transaction(async (manager) => {
+      const ticketRepo = manager.getRepository(CheckoutTicket);
+      const deviceRepo = manager.getRepository(CheckoutDevice);
+      const eventRepo = manager.getRepository(CheckoutTicketEvent);
+      const itemRepo = manager.getRepository(CheckoutTicketItem);
+      const entryRepo = manager.getRepository(ActivityRegistrationEntry);
+
+      const locked = await ticketRepo.findOne({
+        where: { id: ticket.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked) throw new NotFoundException('ไม่พบคิว');
+      if (
+        locked.status !== CheckoutTicketStatus.PREPARING &&
+        locked.status !== CheckoutTicketStatus.READY
+      ) {
+        throw new BadRequestException(
+          `release ได้จาก preparing/ready เท่านั้น (ตอนนี้: ${locked.status})`,
+        );
+      }
+
+      let device: CheckoutDevice | null = null;
+      if (dto.device_code) {
+        device = await deviceRepo.findOne({
+          where: { device_code: dto.device_code.trim().toUpperCase() },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!device || locked.device_id !== device.id) {
+          throw new BadRequestException('คิวนี้ไม่ได้ผูกกับเครื่องนี้');
+        }
+      } else if (locked.device_id != null) {
+        device = await deviceRepo.findOne({
+          where: { id: locked.device_id },
+          lock: { mode: 'pessimistic_write' },
+        });
+      }
+
+      const fromStatus = locked.status;
+      locked.status = CheckoutTicketStatus.WAITING;
+      locked.device_id = null;
+      locked.staff_user_id = null;
+      locked.staff_name = null;
+      locked.preparing_at = null;
+      locked.ready_at = null;
+      await ticketRepo.save(locked);
+
+      const items = await itemRepo.find({ where: { ticket_id: locked.id } });
+      if (items.length) {
+        const entries = await entryRepo.find({
+          where: { id: In(items.map((i) => i.entry_id)) },
+        });
+        for (const entry of entries) {
+          entry.ready_to_checkout = false;
+        }
+        await entryRepo.save(entries);
+      }
+
+      if (device) {
+        device.status = CheckoutDeviceStatus.ONLINE_IDLE;
+        device.current_ticket_id = null;
+        this.touchDeviceHeartbeat(device, new Date());
+        await deviceRepo.save(device);
+      }
+
+      await eventRepo.save(
+        eventRepo.create({
+          ticket_id: locked.id,
+          from_status: fromStatus,
+          to_status: CheckoutTicketStatus.WAITING,
+          actor_user_id: dto.staff_user_id ?? null,
+          device_id: device?.id ?? null,
+          meta_json: JSON.stringify({
+            reason: 'pos_release',
+            staff_name: dto.staff_name?.trim() || null,
+          }),
+        }),
+      );
+    });
+
+    const detail = await this.getTicketDetail(ticket.id);
+    await this.emitLive(detail);
+    await this.dispatchAfter(ticket.activity_id);
     return detail;
   }
 
@@ -973,11 +1287,12 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);
+    await this.dispatchAfter(ticket.activity_id);
     return detail;
   }
 
   /**
-   * Admin ปิดคิวแทนพนักงาน (force complete) — ใช้กรณีเครื่องค้าง/พนักงานกดไม่ทัน
+   * Admin ปิดคิวแทนพนักงาน (force complete)
    * ปิดได้จากทุกสถานะที่ยังเดินอยู่ (waiting/preparing/ready) และมาร์คปลาในใบว่า
    * checkout แล้วทันทีในทรานแซกชันเดียวกัน
    */
@@ -1065,6 +1380,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);
+    await this.dispatchAfter(ticket.activity_id);
     return detail;
   }
 
@@ -1177,6 +1493,10 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         complete: payload.counts.complete,
       };
       nextWaiting = await this.peekNextWaiting(resolvedActivityId);
+    }
+
+    if (resolvedActivityId != null) {
+      void this.dispatchAfter(resolvedActivityId);
     }
 
     return {
@@ -1602,12 +1922,18 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             where: { id: locked.current_ticket_id },
             lock: { mode: 'pessimistic_write' },
           });
-          if (ticket && ticket.status === CheckoutTicketStatus.PREPARING) {
+          if (
+            ticket &&
+            (ticket.status === CheckoutTicketStatus.PREPARING ||
+              ticket.status === CheckoutTicketStatus.READY)
+          ) {
+            const fromStatus = ticket.status;
             ticket.status = CheckoutTicketStatus.WAITING;
             ticket.device_id = null;
             ticket.staff_user_id = null;
             ticket.staff_name = null;
             ticket.preparing_at = null;
+            ticket.ready_at = null;
             await ticketRepo.save(ticket);
 
             const items = await itemRepo.find({
@@ -1626,7 +1952,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             await eventRepo.save(
               eventRepo.create({
                 ticket_id: ticket.id,
-                from_status: CheckoutTicketStatus.PREPARING,
+                from_status: fromStatus,
                 to_status: CheckoutTicketStatus.WAITING,
                 actor_user_id: null,
                 device_id: locked.id,
@@ -1655,6 +1981,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       for (const activityId of activityIds) {
         const board = await this.getBoard(activityId);
         this.gateway.emitBoardUpdated(activityId, board);
+        void this.dispatchAfter(activityId);
       }
     }
     return reclaimed;
