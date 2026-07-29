@@ -4,6 +4,7 @@ import { CheckoutDevice } from '../entities/checkout-device.entity';
 import { CheckoutTicket } from '../entities/checkout-ticket.entity';
 import { CheckoutTicketItem } from '../entities/checkout-ticket-item.entity';
 import { CheckoutTicketEvent } from '../entities/checkout-ticket-event.entity';
+import { CheckoutQueueSettings } from '../entities/checkout-queue-settings.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivityRegistrationEntry } from '../entities/activity-registration-entry.entity';
 import { Activity } from '../entities/activity.entity';
@@ -27,6 +28,7 @@ import { PosDeviceController } from './pos-device.controller';
       CheckoutTicket,
       CheckoutTicketItem,
       CheckoutTicketEvent,
+      CheckoutQueueSettings,
       ActivityRegistration,
       ActivityRegistrationEntry,
       Activity,

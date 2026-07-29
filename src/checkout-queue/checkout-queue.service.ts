@@ -20,6 +20,7 @@ import {
 } from '../entities/checkout-ticket.entity';
 import { CheckoutTicketItem } from '../entities/checkout-ticket-item.entity';
 import { CheckoutTicketEvent } from '../entities/checkout-ticket-event.entity';
+import { CheckoutQueueSettings } from '../entities/checkout-queue-settings.entity';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { ActivityRegistrationEntry } from '../entities/activity-registration-entry.entity';
 import { Activity } from '../entities/activity.entity';
@@ -37,6 +38,7 @@ import type {
   CreateCheckoutTicketDto,
   CheckoutQueueTransitionDto,
   UpdateCheckoutDeviceDto,
+  UpdateCheckoutQueueSettingsDto,
   UpsertCheckoutDeviceDto,
 } from './dto/checkout-queue.dto';
 
@@ -46,15 +48,17 @@ const ACTIVE_TICKET_STATUSES = [
   CheckoutTicketStatus.READY,
 ] as const;
 
-/** เครื่องไม่มี heartbeat → ถือว่า offline (ยังไม่คืนคิวทันที) */
-const DEVICE_OFFLINE_MS = 60_000;
-/**
- * คืนคิว preparing กลับ waiting เมื่อเครื่องเงียบจริง ๆ
- * ต้องยาวพอให้ staff เดินไปหยิบปลาได้ (เดิม 30–90 วิ สั้นเกินไป)
- */
-const TICKET_RECLAIM_PREPARING_MS = 15 * 60_000;
-const RECLAIM_INTERVAL_MS = 15_000;
+/** ค่าเริ่มต้นเมื่อยังไม่มีแถวใน DB */
+const DEFAULT_DEVICE_OFFLINE_MS = 60_000;
+const DEFAULT_TICKET_RECLAIM_MS = 15 * 60_000;
+const DEFAULT_RECLAIM_INTERVAL_MS = 15_000;
 const QUEUE_CODE_PREFIX = 'A';
+
+export type CheckoutQueueRuntimeSettings = {
+  device_offline_ms: number;
+  ticket_reclaim_ms: number;
+  reclaim_interval_ms: number;
+};
 
 export type CheckoutTicketDetail = {
   id: number;
@@ -196,6 +200,7 @@ type MyCheckoutEntryRaw = {
 export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CheckoutQueueService.name);
   private reclaimTimer: ReturnType<typeof setInterval> | null = null;
+  private settingsCache: CheckoutQueueRuntimeSettings | null = null;
 
   constructor(
     @InjectRepository(CheckoutDevice)
@@ -206,6 +211,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     private readonly itemRepo: Repository<CheckoutTicketItem>,
     @InjectRepository(CheckoutTicketEvent)
     private readonly eventRepo: Repository<CheckoutTicketEvent>,
+    @InjectRepository(CheckoutQueueSettings)
+    private readonly settingsRepo: Repository<CheckoutQueueSettings>,
     @InjectRepository(ActivityRegistration)
     private readonly registrationRepo: Repository<ActivityRegistration>,
     @InjectRepository(ActivityRegistrationEntry)
@@ -219,21 +226,116 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     private readonly gateway: CheckoutQueueGateway,
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    await this.ensureSettingsRow();
+    await this.rescheduleReclaimTimer();
+  }
+
+  onModuleDestroy(): void {
+    this.clearReclaimTimer();
+  }
+
+  private clearReclaimTimer(): void {
+    if (this.reclaimTimer) {
+      clearInterval(this.reclaimTimer);
+      this.reclaimTimer = null;
+    }
+  }
+
+  private async rescheduleReclaimTimer(): Promise<void> {
+    this.clearReclaimTimer();
+    const settings = await this.getRuntimeSettings();
     this.reclaimTimer = setInterval(() => {
       void this.reclaimStaleDevices().catch((err) => {
         this.logger.warn(
           `reclaimStaleDevices failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
-    }, RECLAIM_INTERVAL_MS);
+    }, settings.reclaim_interval_ms);
+    this.logger.log(
+      `checkout reclaim timer every ${settings.reclaim_interval_ms}ms`,
+    );
   }
 
-  onModuleDestroy(): void {
-    if (this.reclaimTimer) {
-      clearInterval(this.reclaimTimer);
-      this.reclaimTimer = null;
+  private defaultsRuntimeSettings(): CheckoutQueueRuntimeSettings {
+    return {
+      device_offline_ms: DEFAULT_DEVICE_OFFLINE_MS,
+      ticket_reclaim_ms: DEFAULT_TICKET_RECLAIM_MS,
+      reclaim_interval_ms: DEFAULT_RECLAIM_INTERVAL_MS,
+    };
+  }
+
+  private toRuntimeSettings(
+    row: CheckoutQueueSettings,
+  ): CheckoutQueueRuntimeSettings {
+    return {
+      device_offline_ms: row.device_offline_ms,
+      ticket_reclaim_ms: row.ticket_reclaim_ms,
+      reclaim_interval_ms: row.reclaim_interval_ms,
+    };
+  }
+
+  private async ensureSettingsRow(): Promise<CheckoutQueueSettings> {
+    const existing = await this.settingsRepo.find({
+      order: { id: 'ASC' },
+      take: 1,
+    });
+    if (existing[0]) return existing[0];
+    const defaults = this.defaultsRuntimeSettings();
+    return this.settingsRepo.save(
+      this.settingsRepo.create({
+        device_offline_ms: defaults.device_offline_ms,
+        ticket_reclaim_ms: defaults.ticket_reclaim_ms,
+        reclaim_interval_ms: defaults.reclaim_interval_ms,
+      }),
+    );
+  }
+
+  async getRuntimeSettings(): Promise<CheckoutQueueRuntimeSettings> {
+    if (this.settingsCache) return this.settingsCache;
+    const row = await this.ensureSettingsRow();
+    this.settingsCache = this.toRuntimeSettings(row);
+    return this.settingsCache;
+  }
+
+  async getQueueSettings(): Promise<
+    CheckoutQueueRuntimeSettings & { id: number; updated_at: string }
+  > {
+    const row = await this.ensureSettingsRow();
+    this.settingsCache = this.toRuntimeSettings(row);
+    return {
+      id: row.id,
+      ...this.settingsCache,
+      updated_at: row.updated_at.toISOString(),
+    };
+  }
+
+  async updateQueueSettings(
+    dto: UpdateCheckoutQueueSettingsDto,
+  ): Promise<CheckoutQueueRuntimeSettings & { id: number; updated_at: string }> {
+    const row = await this.ensureSettingsRow();
+    if (dto.device_offline_ms != null) {
+      row.device_offline_ms = dto.device_offline_ms;
     }
+    if (dto.ticket_reclaim_ms != null) {
+      row.ticket_reclaim_ms = dto.ticket_reclaim_ms;
+    }
+    if (dto.reclaim_interval_ms != null) {
+      row.reclaim_interval_ms = dto.reclaim_interval_ms;
+    }
+    if (row.ticket_reclaim_ms < row.device_offline_ms) {
+      throw new BadRequestException(
+        'เวลาคืนคิว (ticket_reclaim) ต้องไม่สั้นกว่าเวลา offline ของเครื่อง',
+      );
+    }
+    const saved = await this.settingsRepo.save(row);
+    this.settingsCache = this.toRuntimeSettings(saved);
+    await this.rescheduleReclaimTimer();
+    return {
+      id: saved.id,
+      ...this.settingsCache,
+      updated_at: saved.updated_at.toISOString(),
+    };
   }
 
   // ─── Devices (admin) ───────────────────────────────────────────────
@@ -749,7 +851,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
   /** จับคู่หนึ่งคิวรอ + หนึ่งเครื่องว่าง (transaction + lock) */
   private async dispatchOne(activityId: number): Promise<number | null> {
-    const onlineSinceMs = Date.now() - DEVICE_OFFLINE_MS;
+    const settings = await this.getRuntimeSettings();
+    const onlineSinceMs = Date.now() - settings.device_offline_ms;
     const queueDate = this.toQueueDate(new Date());
 
     return this.dataSource.transaction(async (manager) => {
@@ -1876,9 +1979,10 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   // ─── Reclaim stale devices ─────────────────────────────────────────
 
   async reclaimStaleDevices(): Promise<number> {
+    const settings = await this.getRuntimeSettings();
     const nowMs = Date.now();
-    const offlineBeforeMs = nowMs - DEVICE_OFFLINE_MS;
-    const reclaimBeforeMs = nowMs - TICKET_RECLAIM_PREPARING_MS;
+    const offlineBeforeMs = nowMs - settings.device_offline_ms;
+    const reclaimBeforeMs = nowMs - settings.ticket_reclaim_ms;
 
     // Use epoch ms column — datetime TZ skew was reclaiming tickets within seconds
     const candidates = await this.deviceRepo
@@ -1958,7 +2062,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
                 device_id: locked.id,
                 meta_json: JSON.stringify({
                   reason: 'heartbeat_timeout',
-                  timeout_ms: TICKET_RECLAIM_PREPARING_MS,
+                  timeout_ms: settings.ticket_reclaim_ms,
                   last_heartbeat_ms: hbMs,
                 }),
               }),

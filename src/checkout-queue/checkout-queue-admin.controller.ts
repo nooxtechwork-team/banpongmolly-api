@@ -7,6 +7,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   Request,
   UseGuards,
@@ -21,12 +22,23 @@ import {
   CancelCheckoutTicketDto,
   UpdateCheckoutDeviceDto,
   UpsertCheckoutDeviceDto,
+  UpdateCheckoutQueueSettingsDto,
 } from './dto/checkout-queue.dto';
 
 @Controller('admin/checkout-queue')
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class CheckoutQueueAdminController {
   constructor(private readonly checkoutQueueService: CheckoutQueueService) {}
+
+  @Get('settings')
+  getSettings() {
+    return this.checkoutQueueService.getQueueSettings();
+  }
+
+  @Put('settings')
+  updateSettings(@Body() dto: UpdateCheckoutQueueSettingsDto) {
+    return this.checkoutQueueService.updateQueueSettings(dto);
+  }
 
   @Get('devices')
   listDevices(@Query('activity_id') activityId?: string) {

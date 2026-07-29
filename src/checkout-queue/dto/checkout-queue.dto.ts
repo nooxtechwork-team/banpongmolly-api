@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -210,4 +211,31 @@ export class PosTransitionDto {
   @IsOptional()
   @IsBoolean()
   print?: boolean;
+}
+
+/** ตั้งค่าเวลาคิว POS — หน่วยมิลลิวินาที */
+export class UpdateCheckoutQueueSettingsDto {
+  /** ไม่มี heartbeat → offline (ยังไม่คืนคิว) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(10_000)
+  @Max(600_000)
+  device_offline_ms?: number;
+
+  /** เครื่องเงียบ → คืนคิวกลับ waiting */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(60_000)
+  @Max(7_200_000)
+  ticket_reclaim_ms?: number;
+
+  /** รอบเช็คเครื่องหลับ */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5_000)
+  @Max(120_000)
+  reclaim_interval_ms?: number;
 }
