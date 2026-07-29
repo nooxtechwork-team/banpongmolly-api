@@ -104,7 +104,7 @@ export class PosDeviceController {
     });
   }
 
-  /** ปฏิเสธคิว (preparing|ready → cancelled) — ลูกค้าต้องสร้างคิวใหม่ */
+  /** ปฏิเสธคิว (ready → cancelled) — หลังพิมพ์พร้อมรับแล้วเท่านั้น; ลูกค้าต้องสร้างคิวใหม่ */
   @Post('queue/:queueCode/release')
   release(
     @Request() req: PosRequest,

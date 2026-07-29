@@ -1237,8 +1237,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * ปฏิเสธคิวจาก POS (preparing|ready → cancelled)
-   * คิวนี้จบแล้ว — ลูกค้าต้องสร้างคิวใหม่เอง ไม่กลับเข้าคิวรอ
+   * ปฏิเสธคิวจาก POS (ready → cancelled)
+   * ใช้ได้หลังกดพร้อมรับแล้วเท่านั้น — ลูกค้าต้องสร้างคิวใหม่เอง
    */
   async releaseTicketFromPos(
     queueCode: string,
@@ -1278,12 +1278,9 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         return locked.activity_id;
       }
 
-      if (
-        locked.status !== CheckoutTicketStatus.PREPARING &&
-        locked.status !== CheckoutTicketStatus.READY
-      ) {
+      if (locked.status !== CheckoutTicketStatus.READY) {
         throw new BadRequestException(
-          `ปฏิเสธได้จาก preparing/ready เท่านั้น (ตอนนี้: ${locked.status})`,
+          `ปฏิเสธได้หลังพร้อมรับ (ready) เท่านั้น (ตอนนี้: ${locked.status})`,
         );
       }
 
