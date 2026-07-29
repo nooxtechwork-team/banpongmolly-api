@@ -1222,6 +1222,25 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         lock: { mode: 'pessimistic_write' },
       });
       if (!locked) throw new NotFoundException('ไม่พบคิว');
+
+      // idempotent: คิวถูกคืนแล้ว → ปลดเครื่องที่ยังถือ current_ticket ค้าง
+      if (locked.status === CheckoutTicketStatus.WAITING) {
+        const deviceCode = dto.device_code?.trim().toUpperCase();
+        if (deviceCode) {
+          const device = await deviceRepo.findOne({
+            where: { device_code: deviceCode },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (device && device.current_ticket_id === locked.id) {
+            device.status = CheckoutDeviceStatus.ONLINE_IDLE;
+            device.current_ticket_id = null;
+            this.touchDeviceHeartbeat(device, new Date());
+            await deviceRepo.save(device);
+          }
+        }
+        return;
+      }
+
       if (
         locked.status !== CheckoutTicketStatus.PREPARING &&
         locked.status !== CheckoutTicketStatus.READY
@@ -1561,6 +1580,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             items: [],
           };
         }
+      }
+
+      // คิวหลุดสถานะ / ไม่ผูกเครื่องนี้แล้ว → เคลียร์ current บนเครื่อง
+      if (
+        current == null ||
+        (current.status !== CheckoutTicketStatus.PREPARING &&
+          current.status !== CheckoutTicketStatus.READY) ||
+        (current.device_id != null && current.device_id !== device.id)
+      ) {
+        device.status = CheckoutDeviceStatus.ONLINE_IDLE;
+        device.current_ticket_id = null;
+        await this.deviceRepo.save(device);
+        current = null;
+      } else if (device.status !== CheckoutDeviceStatus.ONLINE_BUSY) {
+        device.status = CheckoutDeviceStatus.ONLINE_BUSY;
+        await this.deviceRepo.save(device);
       }
     }
 
