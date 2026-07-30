@@ -125,7 +125,11 @@ export class CheckoutQueueAdminController {
   ) {
     return this.checkoutQueueService.cancelTicket(
       id,
-      { userId: req.user.id, isAdmin: true },
+      {
+        userId: req.user.id,
+        isAdmin: true,
+        name: req.user.fullname || req.user.email || null,
+      },
       dto,
     );
   }

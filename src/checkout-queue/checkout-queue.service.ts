@@ -70,6 +70,10 @@ export type CheckoutTicketDetail = {
   status: CheckoutTicketStatus;
   device_id: number | null;
   device_code: string | null;
+  /** เครื่องที่ยกเลิก/ปล่อยคิว (เช่น POS reject) */
+  released_by_device_id: number | null;
+  released_by_device_code: string | null;
+  released_by_device_name: string | null;
   staff_user_id: number | null;
   staff_name: string | null;
   note: string | null;
@@ -108,6 +112,10 @@ export type AdminCheckoutTicketRow = {
   item_codes: string[];
   device_id: number | null;
   device_code: string | null;
+  released_by_device_id: number | null;
+  released_by_device_code: string | null;
+  released_by_device_name: string | null;
+  staff_user_id: number | null;
   staff_name: string | null;
   note: string | null;
   cancel_reason: string | null;
@@ -600,7 +608,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
   async cancelTicket(
     ticketId: number,
-    actor: { userId: number; isAdmin: boolean },
+    actor: { userId: number; isAdmin: boolean; name?: string | null },
     dto: CancelCheckoutTicketDto,
   ): Promise<CheckoutTicketDetail> {
     const ticket = await this.requireTicketById(ticketId);
@@ -621,6 +629,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       const eventRepo = manager.getRepository(CheckoutTicketEvent);
       const itemRepo = manager.getRepository(CheckoutTicketItem);
       const entryRepo = manager.getRepository(ActivityRegistrationEntry);
+      const userRepo = manager.getRepository(User);
 
       const locked = await ticketRepo.findOne({
         where: { id: ticket.id },
@@ -644,7 +653,30 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       locked.cancelled_at = now;
       locked.device_id = null;
       locked.released_by_device_id = deviceId;
+
+      // แอดมินยกเลิก → บันทึกคนที่ยกเลิกเสมอ
+      if (actor.isAdmin) {
+        locked.staff_user_id = actor.userId;
+        let adminName = actor.name?.trim() || null;
+        if (!adminName) {
+          const admin = await userRepo.findOne({ where: { id: actor.userId } });
+          adminName = admin?.fullname?.trim() || admin?.email || null;
+        }
+        locked.staff_name = adminName;
+      }
+
       await ticketRepo.save(locked);
+
+      // ยืนยัน staff ของแอดมินถูก persist (กัน change-detection ของ TypeORM พลาด)
+      if (actor.isAdmin) {
+        await ticketRepo.update(
+          { id: locked.id },
+          {
+            staff_user_id: locked.staff_user_id,
+            staff_name: locked.staff_name,
+          },
+        );
+      }
 
       const items = await itemRepo.find({ where: { ticket_id: locked.id } });
       if (items.length) {
@@ -1344,6 +1376,9 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       locked.cancelled_at = now;
       locked.device_id = null;
       locked.released_by_device_id = deviceId;
+      if (dto.staff_user_id != null) {
+        locked.staff_user_id = dto.staff_user_id;
+      }
       if (dto.staff_name?.trim()) {
         locked.staff_name = dto.staff_name.trim();
       }
@@ -1443,11 +1478,15 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       const staffName =
         dto.staff_name?.trim() || locked.staff_name || device?.name || null;
       const staffUserId = dto.staff_user_id ?? locked.staff_user_id;
+      const deviceId = device?.id ?? locked.device_id;
 
       locked.status = CheckoutTicketStatus.COMPLETE;
       locked.completed_at = now;
       locked.staff_name = staffName;
       locked.staff_user_id = staffUserId;
+      if (deviceId != null) {
+        locked.released_by_device_id = deviceId;
+      }
       await ticketRepo.save(locked);
 
       const items = await itemRepo.find({ where: { ticket_id: locked.id } });
@@ -1477,7 +1516,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           from_status: fromStatus,
           to_status: CheckoutTicketStatus.COMPLETE,
           actor_user_id: staffUserId,
-          device_id: locked.device_id,
+          device_id: deviceId,
           meta_json: null,
         }),
       );
@@ -1523,13 +1562,18 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
       const now = new Date();
       const fromStatus = locked.status;
-      const staffName = locked.staff_name || actor.name;
-      const staffUserId = locked.staff_user_id ?? actor.userId;
+      const staffName = actor.name?.trim() || locked.staff_name;
+      const staffUserId = actor.userId;
+      const deviceId = locked.device_id;
 
       locked.status = CheckoutTicketStatus.COMPLETE;
       locked.completed_at = now;
       locked.staff_name = staffName;
       locked.staff_user_id = staffUserId;
+      // คง device_id ไว้ถ้ามี — ถ้าไม่มีเครื่อง (เช่น admin ปิดคิว waiting) ก็ไม่ต้องมี
+      if (deviceId != null) {
+        locked.released_by_device_id = deviceId;
+      }
       await ticketRepo.save(locked);
 
       const items = await itemRepo.find({ where: { ticket_id: locked.id } });
@@ -1547,9 +1591,9 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         await entryRepo.save(entries);
       }
 
-      if (locked.device_id != null) {
+      if (deviceId != null) {
         const device = await deviceRepo.findOne({
-          where: { id: locked.device_id },
+          where: { id: deviceId },
           lock: { mode: 'pessimistic_write' },
         });
         // ปล่อยเครื่องให้ว่าง เฉพาะกรณีที่ยังถือใบนี้อยู่
@@ -1566,7 +1610,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           from_status: fromStatus,
           to_status: CheckoutTicketStatus.COMPLETE,
           actor_user_id: actor.userId,
-          device_id: locked.device_id,
+          device_id: deviceId,
           meta_json: JSON.stringify({
             source: 'admin_force_complete',
             from_status: fromStatus,
@@ -1644,6 +1688,9 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             status: row.status,
             device_id: row.device_id,
             device_code: device.device_code,
+            released_by_device_id: row.released_by_device_id,
+            released_by_device_code: null,
+            released_by_device_name: null,
             staff_user_id: row.staff_user_id,
             staff_name: row.staff_name,
             note: row.note,
@@ -1960,7 +2007,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     const deviceIds = [
       ...new Set(
         tickets
-          .map((t) => t.device_id)
+          .flatMap((t) => [t.device_id, t.released_by_device_id])
           .filter((id): id is number => id != null),
       ),
     ];
@@ -1969,6 +2016,20 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       : [];
     const deviceMap = new Map(devices.map((d) => [d.id, d]));
 
+    const staffUserIds = [
+      ...new Set(
+        tickets
+          .map((t) => t.staff_user_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const staffUsers = staffUserIds.length
+      ? await this.dataSource.getRepository(User).find({
+          where: { id: In(staffUserIds) },
+        })
+      : [];
+    const staffUserMap = new Map(staffUsers.map((u) => [u.id, u]));
+
     let waitingPosition = 0;
     const rows: AdminCheckoutTicketRow[] = tickets.map((ticket) => {
       const ticketItems = itemsByTicket.get(ticket.id) ?? [];
@@ -1976,6 +2037,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         ? regMap.get(ticketItems[0]!.registration_id)
         : undefined;
       if (ticket.status === CheckoutTicketStatus.WAITING) waitingPosition += 1;
+
+      const activeDevice =
+        ticket.device_id != null ? deviceMap.get(ticket.device_id) : undefined;
+      const releasedDevice =
+        ticket.released_by_device_id != null
+          ? deviceMap.get(ticket.released_by_device_id)
+          : undefined;
+      const staffUser =
+        ticket.staff_user_id != null
+          ? staffUserMap.get(ticket.staff_user_id)
+          : undefined;
+      const staffName =
+        ticket.staff_name?.trim()
+        || staffUser?.fullname?.trim()
+        || staffUser?.email
+        || null;
 
       return {
         id: ticket.id,
@@ -1992,11 +2069,12 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           (i) => i.entry_code || `#${i.entry_id}`,
         ),
         device_id: ticket.device_id,
-        device_code:
-          ticket.device_id != null
-            ? (deviceMap.get(ticket.device_id)?.device_code ?? null)
-            : null,
-        staff_name: ticket.staff_name,
+        device_code: activeDevice?.device_code ?? null,
+        released_by_device_id: ticket.released_by_device_id,
+        released_by_device_code: releasedDevice?.device_code ?? null,
+        released_by_device_name: releasedDevice?.name ?? null,
+        staff_user_id: ticket.staff_user_id,
+        staff_name: staffName,
         note: ticket.note,
         cancel_reason: ticket.cancel_reason,
         requested_at: ticket.requested_at.toISOString(),
@@ -2020,6 +2098,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
             row.registration_no,
             row.farm_name,
             row.device_code,
+            row.released_by_device_code,
+            row.released_by_device_name,
             row.staff_name,
             ...row.item_codes,
           ].some((value) => (value ?? '').toLowerCase().includes(keyword)),
@@ -2080,6 +2160,16 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       deviceCode = device?.device_code ?? null;
     }
 
+    let releasedByDeviceCode: string | null = null;
+    let releasedByDeviceName: string | null = null;
+    if (ticket.released_by_device_id != null) {
+      const releasedDevice = await this.deviceRepo.findOne({
+        where: { id: ticket.released_by_device_id },
+      });
+      releasedByDeviceCode = releasedDevice?.device_code ?? null;
+      releasedByDeviceName = releasedDevice?.name ?? null;
+    }
+
     let position: number | null = null;
     if (ticket.status === CheckoutTicketStatus.WAITING) {
       position = await this.ticketRepo
@@ -2107,6 +2197,14 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       };
     });
 
+    let staffName = ticket.staff_name?.trim() || null;
+    if (!staffName && ticket.staff_user_id != null) {
+      const staffUser = await this.dataSource.getRepository(User).findOne({
+        where: { id: ticket.staff_user_id },
+      });
+      staffName = staffUser?.fullname?.trim() || staffUser?.email || null;
+    }
+
     return {
       id: ticket.id,
       activity_id: ticket.activity_id,
@@ -2117,8 +2215,11 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       status: ticket.status,
       device_id: ticket.device_id,
       device_code: deviceCode,
+      released_by_device_id: ticket.released_by_device_id,
+      released_by_device_code: releasedByDeviceCode,
+      released_by_device_name: releasedByDeviceName,
       staff_user_id: ticket.staff_user_id,
-      staff_name: ticket.staff_name,
+      staff_name: staffName,
       note: ticket.note,
       cancel_reason: ticket.cancel_reason,
       requested_at: ticket.requested_at.toISOString(),
@@ -2314,6 +2415,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
+
     return `${y}-${m}-${day}`;
   }
 
