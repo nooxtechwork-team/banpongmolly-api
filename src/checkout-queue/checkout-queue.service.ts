@@ -1270,8 +1270,9 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * ปฏิเสธคิวจาก POS (ready → cancelled)
-   * ใช้ได้หลังกดพร้อมรับแล้วเท่านั้น — ลูกค้าต้องสร้างคิวใหม่เอง
+   * ยกเลิกคิวจาก POS — logic เดียวกับ Backoffice cancelTicket
+   * ยกเลิกได้ waiting / preparing / ready (ยกเว้น complete / cancelled)
+   * คืน entry เป็น ready_to_checkout + เคลียร์คำขอคืนปลา
    */
   async releaseTicketFromPos(
     queueCode: string,
@@ -1311,10 +1312,8 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         return locked.activity_id;
       }
 
-      if (locked.status !== CheckoutTicketStatus.READY) {
-        throw new BadRequestException(
-          `ปฏิเสธได้หลังพร้อมรับ (ready) เท่านั้น (ตอนนี้: ${locked.status})`,
-        );
+      if (locked.status === CheckoutTicketStatus.COMPLETE) {
+        throw new BadRequestException('คิวที่ปิดแล้วยกเลิกไม่ได้');
       }
 
       let device: CheckoutDevice | null = null;
@@ -1323,7 +1322,11 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           where: { device_code: dto.device_code.trim().toUpperCase() },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!device || locked.device_id !== device.id) {
+        if (!device) {
+          throw new BadRequestException('ไม่พบเครื่อง');
+        }
+        // คิวที่ผูกเครื่องแล้วต้องเป็นเครื่องนี้; waiting ที่ยังไม่มีเครื่อง ยกเลิกได้
+        if (locked.device_id != null && locked.device_id !== device.id) {
           throw new BadRequestException('คิวนี้ไม่ได้ผูกกับเครื่องนี้');
         }
       } else if (locked.device_id != null) {
@@ -1337,14 +1340,13 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       const now = new Date();
       const deviceId = device?.id ?? locked.device_id;
       locked.status = CheckoutTicketStatus.CANCELLED;
-      locked.device_id = null;
-      locked.released_by_device_id = deviceId;
-      locked.staff_user_id = null;
-      locked.staff_name = dto.staff_name?.trim() || locked.staff_name;
-      locked.preparing_at = null;
-      locked.ready_at = null;
       locked.cancel_reason = 'pos_reject';
       locked.cancelled_at = now;
+      locked.device_id = null;
+      locked.released_by_device_id = deviceId;
+      if (dto.staff_name?.trim()) {
+        locked.staff_name = dto.staff_name.trim();
+      }
       await ticketRepo.save(locked);
 
       const items = await itemRepo.find({ where: { ticket_id: locked.id } });
@@ -1353,12 +1355,15 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           where: { id: In(items.map((i) => i.entry_id)) },
         });
         for (const entry of entries) {
-          entry.ready_to_checkout = false;
+          // คืนสถานะพร้อมเช็คเอาท์ — ให้ขอคิวใหม่ได้โดยไม่ต้องมาร์คพร้อมอีกครั้ง
+          entry.ready_to_checkout = true;
+          entry.checkout_requested_at = null;
+          entry.checkout_request_email_sent_at = null;
         }
         await entryRepo.save(entries);
       }
 
-      if (device) {
+      if (device && device.current_ticket_id === locked.id) {
         device.status = CheckoutDeviceStatus.ONLINE_IDLE;
         device.current_ticket_id = null;
         this.touchDeviceHeartbeat(device, now);
@@ -1371,9 +1376,10 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           from_status: fromStatus,
           to_status: CheckoutTicketStatus.CANCELLED,
           actor_user_id: dto.staff_user_id ?? null,
-          device_id: device?.id ?? null,
+          device_id: deviceId,
           meta_json: JSON.stringify({
             reason: 'pos_reject',
+            from_status: fromStatus,
             staff_name: dto.staff_name?.trim() || null,
           }),
         }),
@@ -1383,7 +1389,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
     const detail = await this.getTicketDetail(ticket.id);
     await this.emitLive(detail);
-    // แจกคิวถัดไปให้เครื่องว่าง — คิวที่ปฏิเสธถูก cancelled แล้วจะไม่ถูกดึงกลับ
+    // แจกคิวถัดไปให้เครื่องว่าง — คิวที่ยกเลิกแล้วจะไม่ถูกดึงกลับ
     await this.dispatchAfter(activityId);
     return detail;
   }
