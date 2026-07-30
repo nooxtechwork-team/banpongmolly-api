@@ -9,7 +9,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import {
   CheckoutDevice,
   CheckoutDeviceStatus,
@@ -293,6 +293,11 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
 
   async getRuntimeSettings(): Promise<CheckoutQueueRuntimeSettings> {
     if (this.settingsCache) return this.settingsCache;
+    return this.loadRuntimeSettingsFromDb();
+  }
+
+  /** โหลดค่าล่าสุดจาก DB — ใช้ใน reclaim timer เพื่อไม่ให้ cache ค้าง */
+  private async loadRuntimeSettingsFromDb(): Promise<CheckoutQueueRuntimeSettings> {
     const row = await this.ensureSettingsRow();
     this.settingsCache = this.toRuntimeSettings(row);
     return this.settingsCache;
@@ -2135,14 +2140,11 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
   // ─── Reclaim stale devices ─────────────────────────────────────────
 
   async reclaimStaleDevices(): Promise<number> {
-    const settings = await this.getRuntimeSettings();
+    const settings = await this.loadRuntimeSettingsFromDb();
     const nowMs = Date.now();
     const offlineBeforeMs = nowMs - settings.device_offline_ms;
     const reclaimBeforeMs = nowMs - settings.ticket_reclaim_ms;
 
-    // Use epoch ms column — datetime TZ skew was reclaiming tickets within seconds
-    // Include offline devices that still hold a ticket past reclaim time — otherwise
-    // marking offline at device_offline_ms (e.g. 60s) excludes them before ticket_reclaim_ms.
     const candidates = await this.deviceRepo
       .createQueryBuilder('d')
       .where('d.is_active = true')
@@ -2159,15 +2161,29 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       )
       .getMany();
 
+    const orphanTicketIds = await this.ticketRepo
+      .createQueryBuilder('t')
+      .innerJoin(CheckoutDevice, 'd', 'd.id = t.device_id')
+      .select('t.id', 'id')
+      .where('t.status IN (:...statuses)', {
+        statuses: [
+          CheckoutTicketStatus.PREPARING,
+          CheckoutTicketStatus.READY,
+        ],
+      })
+      .andWhere('d.is_active = true')
+      .andWhere('d.last_heartbeat_ms IS NOT NULL')
+      .andWhere('CAST(d.last_heartbeat_ms AS UNSIGNED) < :reclaimBeforeMs', {
+        reclaimBeforeMs,
+      })
+      .getRawMany<{ id: number }>();
+
     let reclaimed = 0;
+    const processedTicketIds = new Set<number>();
+
     for (const device of candidates) {
       const activityIds = await this.dataSource.transaction(async (manager) => {
         const deviceRepo = manager.getRepository(CheckoutDevice);
-        const ticketRepo = manager.getRepository(CheckoutTicket);
-        const eventRepo = manager.getRepository(CheckoutTicketEvent);
-        const itemRepo = manager.getRepository(CheckoutTicketItem);
-        const entryRepo = manager.getRepository(ActivityRegistrationEntry);
-
         const locked = await deviceRepo.findOne({
           where: { id: device.id },
           lock: { mode: 'pessimistic_write' },
@@ -2179,68 +2195,29 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           return [] as number[];
         }
 
-        const affectedActivityIds: number[] = [];
         const canReclaimTicket = hbMs < reclaimBeforeMs;
-        let clearedTicket = false;
+        const affectedActivityIds: number[] = [];
 
         if (locked.current_ticket_id != null && canReclaimTicket) {
-          const ticket = await ticketRepo.findOne({
-            where: { id: locked.current_ticket_id },
-            lock: { mode: 'pessimistic_write' },
-          });
-          if (
-            ticket &&
-            (ticket.status === CheckoutTicketStatus.PREPARING ||
-              ticket.status === CheckoutTicketStatus.READY)
-          ) {
-            const fromStatus = ticket.status;
-            ticket.status = CheckoutTicketStatus.WAITING;
-            ticket.device_id = null;
-            ticket.released_by_device_id = locked.id;
-            ticket.staff_user_id = null;
-            ticket.staff_name = null;
-            ticket.preparing_at = null;
-            ticket.ready_at = null;
-            await ticketRepo.save(ticket);
-
-            const items = await itemRepo.find({
-              where: { ticket_id: ticket.id },
-            });
-            if (items.length) {
-              const entries = await entryRepo.find({
-                where: { id: In(items.map((i) => i.entry_id)) },
-              });
-              for (const entry of entries) {
-                entry.ready_to_checkout = false;
-              }
-              await entryRepo.save(entries);
-            }
-
-            await eventRepo.save(
-              eventRepo.create({
-                ticket_id: ticket.id,
-                from_status: fromStatus,
-                to_status: CheckoutTicketStatus.WAITING,
-                actor_user_id: null,
-                device_id: locked.id,
-                meta_json: JSON.stringify({
-                  reason: 'heartbeat_timeout',
-                  timeout_ms: settings.ticket_reclaim_ms,
-                  last_heartbeat_ms: hbMs,
-                }),
-              }),
-            );
-            affectedActivityIds.push(ticket.activity_id);
+          const ticketId = await this.reclaimHeldTicket(
+            manager,
+            locked,
+            locked.current_ticket_id,
+            settings,
+            hbMs,
+            'heartbeat_timeout',
+          );
+          if (ticketId != null) {
+            processedTicketIds.add(ticketId);
             reclaimed += 1;
-            locked.current_ticket_id = null;
-            clearedTicket = true;
+            const ticket = await manager.getRepository(CheckoutTicket).findOne({
+              where: { id: ticketId },
+            });
+            if (ticket) affectedActivityIds.push(ticket.activity_id);
           }
         }
 
         locked.status = CheckoutDeviceStatus.OFFLINE;
-        if (clearedTicket) {
-          locked.current_ticket_id = null;
-        }
         await deviceRepo.save(locked);
         return affectedActivityIds;
       });
@@ -2251,7 +2228,140 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         void this.dispatchAfter(activityId);
       }
     }
+
+    for (const row of orphanTicketIds) {
+      const ticketId = Number(row.id);
+      if (!Number.isFinite(ticketId) || processedTicketIds.has(ticketId)) {
+        continue;
+      }
+
+      const activityIds = await this.dataSource.transaction(async (manager) => {
+        const ticketRepo = manager.getRepository(CheckoutTicket);
+        const deviceRepo = manager.getRepository(CheckoutDevice);
+
+        const ticket = await ticketRepo.findOne({
+          where: { id: ticketId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (
+          !ticket ||
+          ticket.device_id == null ||
+          (ticket.status !== CheckoutTicketStatus.PREPARING &&
+            ticket.status !== CheckoutTicketStatus.READY)
+        ) {
+          return [] as number[];
+        }
+
+        const device = await deviceRepo.findOne({
+          where: { id: ticket.device_id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!device || !device.is_active) return [] as number[];
+
+        const hbMs = this.deviceHeartbeatMs(device);
+        if (hbMs == null || hbMs >= reclaimBeforeMs) return [] as number[];
+
+        const reclaimedId = await this.reclaimHeldTicket(
+          manager,
+          device,
+          ticket.id,
+          settings,
+          hbMs,
+          'heartbeat_timeout_orphan',
+        );
+        if (reclaimedId == null) return [] as number[];
+
+        processedTicketIds.add(reclaimedId);
+        reclaimed += 1;
+        device.status = CheckoutDeviceStatus.OFFLINE;
+        await deviceRepo.save(device);
+        return [ticket.activity_id];
+      });
+
+      for (const activityId of activityIds) {
+        const board = await this.getBoard(activityId);
+        this.gateway.emitBoardUpdated(activityId, board);
+        void this.dispatchAfter(activityId);
+      }
+    }
+
+    if (reclaimed > 0) {
+      this.logger.log(`reclaimStaleDevices reclaimed ${reclaimed} ticket(s)`);
+    }
     return reclaimed;
+  }
+
+  /** คืนคิวที่ผูกกับเครื่อง → waiting; คืน ticket id ถ้าสำเร็จ */
+  private async reclaimHeldTicket(
+    manager: EntityManager,
+    device: CheckoutDevice,
+    ticketId: number,
+    settings: CheckoutQueueRuntimeSettings,
+    hbMs: number,
+    reason: string,
+  ): Promise<number | null> {
+    const ticketRepo = manager.getRepository(CheckoutTicket);
+    const eventRepo = manager.getRepository(CheckoutTicketEvent);
+    const itemRepo = manager.getRepository(CheckoutTicketItem);
+    const entryRepo = manager.getRepository(ActivityRegistrationEntry);
+    const deviceRepo = manager.getRepository(CheckoutDevice);
+
+    const ticket = await ticketRepo.findOne({
+      where: { id: ticketId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (
+      !ticket ||
+      (ticket.status !== CheckoutTicketStatus.PREPARING &&
+        ticket.status !== CheckoutTicketStatus.READY)
+    ) {
+      return null;
+    }
+
+    const fromStatus = ticket.status;
+    ticket.status = CheckoutTicketStatus.WAITING;
+    ticket.device_id = null;
+    ticket.released_by_device_id = device.id;
+    ticket.staff_user_id = null;
+    ticket.staff_name = null;
+    ticket.preparing_at = null;
+    ticket.ready_at = null;
+    await ticketRepo.save(ticket);
+
+    const items = await itemRepo.find({
+      where: { ticket_id: ticket.id },
+    });
+    if (items.length) {
+      const entries = await entryRepo.find({
+        where: { id: In(items.map((i) => i.entry_id)) },
+      });
+      for (const entry of entries) {
+        entry.ready_to_checkout = false;
+      }
+      await entryRepo.save(entries);
+    }
+
+    await eventRepo.save(
+      eventRepo.create({
+        ticket_id: ticket.id,
+        from_status: fromStatus,
+        to_status: CheckoutTicketStatus.WAITING,
+        actor_user_id: null,
+        device_id: device.id,
+        meta_json: JSON.stringify({
+          reason,
+          timeout_ms: settings.ticket_reclaim_ms,
+          last_heartbeat_ms: hbMs,
+        }),
+      }),
+    );
+
+    if (device.current_ticket_id === ticket.id) {
+      device.current_ticket_id = null;
+      await deviceRepo.save(device);
+    }
+
+    return ticket.id;
   }
 
   /** Timezone-safe heartbeat stamp (epoch ms + legacy datetime). */

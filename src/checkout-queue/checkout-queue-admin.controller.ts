@@ -40,6 +40,13 @@ export class CheckoutQueueAdminController {
     return this.checkoutQueueService.updateQueueSettings(dto);
   }
 
+  /** บังคับสแกนคืนคิวจากเครื่องที่ heartbeat หาย (ใช้หลัง deploy / debug) */
+  @Post('reclaim-stale')
+  async reclaimStale() {
+    const reclaimed = await this.checkoutQueueService.reclaimStaleDevices();
+    return { reclaimed };
+  }
+
   @Get('devices')
   listDevices(@Query('activity_id') activityId?: string) {
     return this.checkoutQueueService.listDevices(
