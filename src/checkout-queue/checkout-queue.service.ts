@@ -2141,16 +2141,22 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     const reclaimBeforeMs = nowMs - settings.ticket_reclaim_ms;
 
     // Use epoch ms column — datetime TZ skew was reclaiming tickets within seconds
+    // Include offline devices that still hold a ticket past reclaim time — otherwise
+    // marking offline at device_offline_ms (e.g. 60s) excludes them before ticket_reclaim_ms.
     const candidates = await this.deviceRepo
       .createQueryBuilder('d')
       .where('d.is_active = true')
-      .andWhere('d.status != :offline', {
-        offline: CheckoutDeviceStatus.OFFLINE,
-      })
       .andWhere('d.last_heartbeat_ms IS NOT NULL')
       .andWhere('CAST(d.last_heartbeat_ms AS UNSIGNED) < :offlineBeforeMs', {
         offlineBeforeMs,
       })
+      .andWhere(
+        `(d.status != :offline OR (d.current_ticket_id IS NOT NULL AND CAST(d.last_heartbeat_ms AS UNSIGNED) < :reclaimBeforeMs))`,
+        {
+          offline: CheckoutDeviceStatus.OFFLINE,
+          reclaimBeforeMs,
+        },
+      )
       .getMany();
 
     let reclaimed = 0;
