@@ -9,8 +9,8 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build \
-  && mkdir -p dist/scripts \
-  && pnpm exec tsc scripts/purge-old-logs.ts \
+    && mkdir -p dist/scripts \
+    && pnpm exec tsc scripts/purge-old-logs.ts \
     --outDir dist/scripts \
     --rootDir scripts \
     --module commonjs \
@@ -25,16 +25,18 @@ RUN pnpm build \
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-# Chromium สำหรับ Puppeteer PDF (ใบเสร็จ / รายงาน)
+# Chromium สำหรับ Puppeteer PDF (ใบเสร็จ / รายงาน) + timezone ไทย
 RUN apk add --no-cache \
     chromium \
     nss \
     freetype \
     harfbuzz \
     ca-certificates \
-    ttf-freefont
+    ttf-freefont \
+    tzdata
 
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+ENV TZ=Asia/Bangkok \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN npm i -g pnpm
