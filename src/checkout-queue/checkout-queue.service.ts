@@ -607,13 +607,17 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     if (!actor.isAdmin && ticket.user_id !== actor.userId) {
       throw new BadRequestException('ไม่มีสิทธิ์ยกเลิกคิวนี้');
     }
-    if (ticket.status !== CheckoutTicketStatus.WAITING) {
-      throw new BadRequestException('ยกเลิกได้เฉพาะคิวที่รออยู่');
+    if (ticket.status === CheckoutTicketStatus.CANCELLED) {
+      throw new BadRequestException('คิวนี้ถูกยกเลิกแล้ว');
+    }
+    if (ticket.status === CheckoutTicketStatus.COMPLETE) {
+      throw new BadRequestException('คิวที่ปิดแล้วยกเลิกไม่ได้');
     }
 
     const now = new Date();
-    await this.dataSource.transaction(async (manager) => {
+    const activityId = await this.dataSource.transaction(async (manager) => {
       const ticketRepo = manager.getRepository(CheckoutTicket);
+      const deviceRepo = manager.getRepository(CheckoutDevice);
       const eventRepo = manager.getRepository(CheckoutTicketEvent);
       const itemRepo = manager.getRepository(CheckoutTicketItem);
       const entryRepo = manager.getRepository(ActivityRegistrationEntry);
@@ -622,13 +626,24 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
         where: { id: ticket.id },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!locked || locked.status !== CheckoutTicketStatus.WAITING) {
-        throw new ConflictException('สถานะคิวเปลี่ยนแล้ว');
+      if (!locked) {
+        throw new NotFoundException('ไม่พบคิว');
       }
+      if (locked.status === CheckoutTicketStatus.CANCELLED) {
+        throw new ConflictException('คิวนี้ถูกยกเลิกแล้ว');
+      }
+      if (locked.status === CheckoutTicketStatus.COMPLETE) {
+        throw new ConflictException('คิวที่ปิดแล้วยกเลิกไม่ได้');
+      }
+
+      const fromStatus = locked.status;
+      const deviceId = locked.device_id;
 
       locked.status = CheckoutTicketStatus.CANCELLED;
       locked.cancel_reason = dto.reason?.trim() || null;
       locked.cancelled_at = now;
+      locked.device_id = null;
+      locked.released_by_device_id = deviceId;
       await ticketRepo.save(locked);
 
       const items = await itemRepo.find({ where: { ticket_id: locked.id } });
@@ -637,28 +652,46 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           where: { id: In(items.map((i) => i.entry_id)) },
         });
         for (const entry of entries) {
-          entry.ready_to_checkout = false;
-          // keep checkout_requested_at history; clear only ready flag
+          // คืนสถานะพร้อมเช็คเอาท์ — ให้ขอคิวใหม่ได้โดยไม่ต้องมาร์คพร้อมอีกครั้ง
+          entry.ready_to_checkout = true;
+          entry.checkout_requested_at = null;
+          entry.checkout_request_email_sent_at = null;
         }
         await entryRepo.save(entries);
+      }
+
+      if (deviceId != null) {
+        const device = await deviceRepo.findOne({
+          where: { id: deviceId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (device && device.current_ticket_id === locked.id) {
+          device.status = CheckoutDeviceStatus.ONLINE_IDLE;
+          device.current_ticket_id = null;
+          this.touchDeviceHeartbeat(device, now);
+          await deviceRepo.save(device);
+        }
       }
 
       await eventRepo.save(
         eventRepo.create({
           ticket_id: locked.id,
-          from_status: CheckoutTicketStatus.WAITING,
+          from_status: fromStatus,
           to_status: CheckoutTicketStatus.CANCELLED,
           actor_user_id: actor.userId,
-          device_id: null,
+          device_id: deviceId,
           meta_json: dto.reason?.trim()
-            ? JSON.stringify({ reason: dto.reason.trim() })
-            : null,
+            ? JSON.stringify({ reason: dto.reason.trim(), from_status: fromStatus })
+            : JSON.stringify({ from_status: fromStatus }),
         }),
       );
+
+      return locked.activity_id;
     });
 
     const detail = await this.getTicketDetail(ticketId);
     await this.emitLive(detail);
+    await this.dispatchAfter(activityId);
     return detail;
   }
 
