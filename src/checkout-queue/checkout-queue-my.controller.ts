@@ -69,6 +69,7 @@ export class MyCheckoutQueueController {
       {
         userId: req.user.id,
         isAdmin: req.user.role === UserRole.ADMIN,
+        name: req.user.fullname || req.user.email || null,
       },
       dto,
     );
