@@ -81,25 +81,43 @@ export class AuthController {
 
   /** เริ่มต้น LINE Login: redirect ไปหน้า LINE */
   @Get('line')
-  async lineOAuthStart(@Res() res: Response) {
+  async lineOAuthStart(
+    @Res() res: Response,
+    @Query('redirect') redirectQuery?: string,
+    @Query('pwa') pwaQuery?: string,
+  ) {
     const channelId = this.configService.get<string>('LINE_CHANNEL_ID');
     const callbackUrl = this.configService.get<string>('LINE_CALLBACK_URL');
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
 
     if (!channelId || !callbackUrl) {
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
       const redirectUrl = `${frontendUrl}/auth/callback?error=line_config_missing`;
       return res.redirect(302, redirectUrl);
     }
 
-    const state = `line_${Math.random().toString(36).slice(2)}`;
+    const safeRedirect = this.sanitizeOAuthRedirect(redirectQuery);
+    const isPwa = pwaQuery === '1' || pwaQuery === 'true';
+    const state = Buffer.from(
+      JSON.stringify({
+        r: safeRedirect,
+        p: isPwa ? 1 : 0,
+        n: Math.random().toString(36).slice(2),
+      }),
+    ).toString('base64url');
+
     const scope = encodeURIComponent('profile openid email');
 
-    const url =
+    let url =
       'https://access.line.me/oauth2/v2.1/authorize' +
       `?response_type=code&client_id=${encodeURIComponent(channelId)}` +
       `&redirect_uri=${encodeURIComponent(callbackUrl)}` +
       `&state=${encodeURIComponent(state)}` +
       `&scope=${scope}`;
+
+    // PWA: กัน LINE เด้งไปแอปแล้วเปิด Safari นอก standalone
+    if (isPwa) {
+      url += '&disable_auto_login=true';
+    }
 
     return res.redirect(302, url);
   }
@@ -256,15 +274,18 @@ export class AuthController {
   @Get('line/callback')
   async lineOAuthCallback(
     @Query('code') code: string | undefined,
-    @Query('state') _state: string | undefined,
+    @Query('state') state: string | undefined,
     @Res() res: Response,
     @Request() req: { ip?: string; headers?: Record<string, unknown> },
   ) {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
+    const { redirectPath, isPwa } = this.parseLineOAuthState(state);
 
     if (!code) {
-      const redirectUrl = `${frontendUrl}/auth/callback?error=line_no_code`;
-      return res.redirect(302, redirectUrl);
+      const params = new URLSearchParams({ error: 'line_no_code' });
+      if (redirectPath !== '/') params.set('redirect', redirectPath);
+      if (isPwa) params.set('pwa', '1');
+      return res.redirect(302, `${frontendUrl}/auth/callback?${params.toString()}`);
     }
 
     try {
@@ -281,9 +302,10 @@ export class AuthController {
       const params = new URLSearchParams({
         access_token: result.access_token,
         refresh_token: result.refresh_token,
+        redirect: redirectPath,
       });
-      const redirectUrl = `${frontendUrl}/auth/callback?${params.toString()}`;
-      return res.redirect(302, redirectUrl);
+      if (isPwa) params.set('pwa', '1');
+      return res.redirect(302, `${frontendUrl}/auth/callback?${params.toString()}`);
     } catch (error: any) {
       const message =
         error?.message && typeof error.message === 'string'
@@ -291,9 +313,44 @@ export class AuthController {
           : 'line_login_failed';
       const params = new URLSearchParams({
         error: message,
+        redirect: redirectPath,
       });
-      const redirectUrl = `${frontendUrl}/auth/callback?${params.toString()}`;
-      return res.redirect(302, redirectUrl);
+      if (isPwa) params.set('pwa', '1');
+      return res.redirect(302, `${frontendUrl}/auth/callback?${params.toString()}`);
+    }
+  }
+
+  private sanitizeOAuthRedirect(path: string | undefined, fallback = '/'): string {
+    if (typeof path !== 'string') return fallback;
+    const trimmed = path.trim();
+    if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback;
+    if (
+      trimmed === '/login' ||
+      trimmed === '/logout' ||
+      trimmed === '/register' ||
+      trimmed.startsWith('/auth/')
+    ) {
+      return fallback;
+    }
+    return trimmed;
+  }
+
+  private parseLineOAuthState(state: string | undefined): {
+    redirectPath: string;
+    isPwa: boolean;
+  } {
+    if (!state) return { redirectPath: '/', isPwa: false };
+    try {
+      const raw = Buffer.from(state, 'base64url').toString('utf8');
+      const parsed = JSON.parse(raw) as { r?: unknown; p?: unknown };
+      return {
+        redirectPath: this.sanitizeOAuthRedirect(
+          typeof parsed.r === 'string' ? parsed.r : undefined,
+        ),
+        isPwa: parsed.p === 1 || parsed.p === true,
+      };
+    } catch {
+      return { redirectPath: '/', isPwa: false };
     }
   }
 }
