@@ -32,6 +32,12 @@ export class PublicSponsorController {
     return this.sponsorService.listAllForHomepage();
   }
 
+  /** หน้า LinkTree สาธารณะของสปอนเซอร์ */
+  @Get('link/:slug')
+  async getPublicLinkTree(@Param('slug') slug: string) {
+    return this.sponsorService.findPublicLinkTree(slug);
+  }
+
   @Post('activity/:activityId/register')
   @UseGuards(JwtAuthGuard)
   async registerForActivity(

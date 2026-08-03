@@ -74,6 +74,7 @@ export interface ActivityPublicSponsor {
   tier: SponsorTier;
   amount: number;
   logo_url: string | null;
+  link_slug: string;
   socials: { type: string; label: string; url: string }[];
 }
 
@@ -808,6 +809,7 @@ export class ActivityService {
         tier: s.tier,
         amount: Number(s.amount),
         logo_url: s.logo_url ?? null,
+        link_slug: (s.link_slug || s.sponsor_no).trim(),
         socials: this.parseSponsorSocialLinks(s.social_links_json),
       })),
       live_embeds: parseActivityLiveEmbedsJson(activity.live_embeds_json),
@@ -1101,7 +1103,7 @@ export class ActivityService {
       const parsed = JSON.parse(json);
       if (!Array.isArray(parsed)) return [];
       return parsed
-        .slice(0, 2)
+        .slice(0, 8)
         .map((v: { type?: string; label?: string; url?: string }) => ({
           type: String(v.type || '').trim(),
           label: String(v.label || '').trim(),

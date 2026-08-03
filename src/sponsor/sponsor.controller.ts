@@ -73,6 +73,8 @@ export class SponsorAdminController {
       receipt_address?: string | null;
       tax_id?: string | null;
       payment_slip?: string | null;
+      socials?: { type: string; label: string; url: string }[] | null;
+      link_slug?: string | null;
     },
   ): Promise<Awaited<ReturnType<typeof this.sponsorService.createAdmin>>> {
     return this.sponsorService.createAdmin(body);
@@ -101,6 +103,8 @@ export class SponsorAdminController {
       receipt_address?: string | null;
       tax_id?: string | null;
       payment_slip?: string | null;
+      socials?: { type: string; label: string; url: string }[] | null;
+      link_slug?: string | null;
     }>,
   ): Promise<Awaited<ReturnType<typeof this.sponsorService.updateAdmin>>> {
     return this.sponsorService.updateAdmin(id, body);

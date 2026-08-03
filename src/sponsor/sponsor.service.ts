@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
@@ -7,6 +11,11 @@ import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { generateReferenceNo } from '../common/utils/reference-no.util';
 import { OrderService } from '../order/order.service';
 import { UserActionLogService } from '../user-action-log/user-action-log.service';
+
+/** จำนวนลิงก์สูงสุดใน LinkTree ของสปอนเซอร์ */
+export const MAX_SPONSOR_LINKS = 8;
+
+export type SponsorSocialLink = { type: string; label: string; url: string };
 
 export interface SponsorListItem {
   id: number;
@@ -17,8 +26,40 @@ export interface SponsorListItem {
   activity_id: number;
   activity_title: string | null;
   logo_url: string | null;
+  link_slug: string | null;
   is_featured_homepage: boolean;
   created_at: string;
+}
+
+export interface SponsorPublicLinkTree {
+  id: number;
+  link_slug: string;
+  brand_display_name: string;
+  tier: SponsorTier;
+  logo_url: string | null;
+  activity_title: string | null;
+  socials: SponsorSocialLink[];
+}
+
+export interface SponsorHomepageItem {
+  id: number;
+  brand_display_name: string;
+  tier: SponsorTier;
+  amount: number;
+  logo_url: string | null;
+  activity_title: string | null;
+  link_slug: string;
+  socials: SponsorSocialLink[];
+}
+
+function slugifySponsor(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 export interface SponsorListOptions {
   page?: number;
@@ -102,6 +143,7 @@ export class SponsorService {
       activity_id: s.activity_id,
       activity_title: activityMap.get(s.activity_id)?.title ?? null,
       logo_url: s.logo_url ?? null,
+      link_slug: this.publicLinkSlug(s),
       is_featured_homepage: s.is_featured_homepage,
       created_at: s.created_at.toISOString(),
     }));
@@ -131,7 +173,8 @@ export class SponsorService {
     receipt_address?: string | null;
     tax_id?: string | null;
     payment_slip?: string | null;
-    socials?: { type: string; label: string; url: string }[] | null;
+    socials?: SponsorSocialLink[] | null;
+    link_slug?: string | null;
   }): Promise<SponsorRegistration> {
     const { sponsor } = await this.createFromSubmission(payload);
     return sponsor;
@@ -153,7 +196,8 @@ export class SponsorService {
       receipt_address?: string | null;
       tax_id?: string | null;
       payment_slip?: string | null;
-      socials?: { type: string; label: string; url: string }[] | null;
+      socials?: SponsorSocialLink[] | null;
+      link_slug?: string | null;
     }>,
   ): Promise<SponsorRegistration> {
     const sponsor = await this.findOneAdmin(id);
@@ -198,10 +242,21 @@ export class SponsorService {
       sponsor.payment_slip = payload.payment_slip ?? null;
     }
     if (payload.socials !== undefined) {
-      sponsor.social_links_json =
-        payload.socials && payload.socials.length
-          ? JSON.stringify(payload.socials.slice(0, 2))
-          : null;
+      sponsor.social_links_json = this.serializeSocialLinks(payload.socials);
+    }
+    if (payload.link_slug !== undefined) {
+      const next = payload.link_slug?.trim()
+        ? await this.ensureUniqueLinkSlug(payload.link_slug, id)
+        : await this.ensureUniqueLinkSlug(
+            sponsor.brand_display_name || sponsor.sponsor_no,
+            id,
+          );
+      sponsor.link_slug = next;
+    } else if (!sponsor.link_slug) {
+      sponsor.link_slug = await this.ensureUniqueLinkSlug(
+        sponsor.brand_display_name || sponsor.sponsor_no,
+        id,
+      );
     }
 
     const saved = await this.sponsorRepo.save(sponsor);
@@ -257,7 +312,8 @@ export class SponsorService {
       receipt_address?: string | null;
       tax_id?: string | null;
       payment_slip?: string | null;
-      socials?: { type: string; label: string; url: string }[] | null;
+      socials?: SponsorSocialLink[] | null;
+      link_slug?: string | null;
     },
     userId?: number | null,
   ): Promise<{
@@ -269,8 +325,15 @@ export class SponsorService {
       status: string;
     };
   }> {
+    const sponsorNo = generateReferenceNo('SP');
+    const linkSlug = await this.ensureUniqueLinkSlug(
+      payload.link_slug?.trim() ||
+        payload.brand_display_name ||
+        sponsorNo,
+    );
+
     const sponsor = this.sponsorRepo.create({
-      sponsor_no: generateReferenceNo('SP'),
+      sponsor_no: sponsorNo,
       activity_id: payload.activity_id,
       user_id: userId ?? null,
       tier: payload.tier,
@@ -285,10 +348,8 @@ export class SponsorService {
       receipt_address: payload.receipt_address ?? null,
       tax_id: payload.tax_id ?? null,
       payment_slip: payload.payment_slip ?? null,
-      social_links_json:
-        payload.socials && payload.socials.length
-          ? JSON.stringify(payload.socials.slice(0, 2))
-          : null,
+      social_links_json: this.serializeSocialLinks(payload.socials),
+      link_slug: linkSlug,
     });
 
     const saved = await this.sponsorRepo.save(sponsor);
@@ -317,6 +378,7 @@ export class SponsorService {
         tier: saved.tier,
         order_id: order.id,
         order_no: order.order_no,
+        link_slug: saved.link_slug,
       },
     });
 
@@ -328,6 +390,52 @@ export class SponsorService {
         total_amount: Number(order.total_amount),
         status: order.status,
       },
+    };
+  }
+
+  /**
+   * หน้า LinkTree สาธารณะ — เฉพาะสปอนเซอร์ที่ชำระแล้ว
+   * หาได้จาก link_slug หรือ sponsor_no
+   */
+  async findPublicLinkTree(slug: string): Promise<SponsorPublicLinkTree> {
+    const key = slug.trim();
+    if (!key) {
+      throw new NotFoundException('ไม่พบหน้าผู้สนับสนุน');
+    }
+
+    const qb = this.paidSponsorsQueryBuilder(false)
+      .andWhere(
+        '(sponsor.link_slug = :key OR LOWER(sponsor.sponsor_no) = :keyLower)',
+        { key, keyLower: key.toLowerCase() },
+      )
+      .orderBy('sponsor.amount', 'DESC')
+      .addOrderBy('sponsor.created_at', 'DESC');
+
+    const sponsor = await qb.getOne();
+    if (!sponsor) {
+      throw new NotFoundException('ไม่พบหน้าผู้สนับสนุน');
+    }
+
+    if (!sponsor.link_slug) {
+      sponsor.link_slug = await this.ensureUniqueLinkSlug(
+        sponsor.brand_display_name || sponsor.sponsor_no,
+        sponsor.id,
+      );
+      await this.sponsorRepo.save(sponsor);
+    }
+
+    const activity = await this.activityRepo.findOne({
+      where: { id: sponsor.activity_id },
+    });
+
+    return {
+      id: sponsor.id,
+      link_slug: this.publicLinkSlug(sponsor),
+      brand_display_name: sponsor.brand_display_name,
+      tier: sponsor.tier,
+      logo_url: sponsor.logo_url ?? null,
+      activity_title: activity?.title ?? null,
+      socials: this.parseSocialLinks(sponsor.social_links_json),
     };
   }
 
@@ -356,22 +464,14 @@ export class SponsorService {
    * รายการสปอนเซอร์ที่ให้แสดงบนหน้าแรก
    * เลือกจาก sponsor_registrations ที่ is_featured_homepage = true และชำระเงินแล้ว
    */
-  async listFeaturedForHomepage(): Promise<
-    {
-      id: number;
-      brand_display_name: string;
-      tier: SponsorTier;
-      amount: number;
-      logo_url: string | null;
-      activity_title: string | null;
-      socials: { type: string; label: string; url: string }[];
-    }[]
-  > {
+  async listFeaturedForHomepage(): Promise<SponsorHomepageItem[]> {
     const sponsors = await this.paidSponsorsQueryBuilder(true)
       .orderBy('sponsor.created_at', 'DESC')
       .getMany();
 
     if (!sponsors.length) return [];
+
+    await this.ensureLinkSlugs(sponsors);
 
     const activityIds = Array.from(
       new Set(sponsors.map((s) => s.activity_id).filter(Boolean)),
@@ -391,6 +491,7 @@ export class SponsorService {
       amount: Number(s.amount),
       logo_url: s.logo_url,
       activity_title: activityMap.get(s.activity_id)?.title ?? null,
+      link_slug: this.publicLinkSlug(s),
       socials: this.parseSocialLinks(s.social_links_json),
     }));
   }
@@ -398,17 +499,7 @@ export class SponsorService {
   /**
    * สปอนเซอร์โดยรวมสำหรับหน้าแรก — รวมทุกแบรนด์ (ไม่ซ้ำชื่อ) ที่ชำระเงินแล้ว
    */
-  async listAllForHomepage(limit = 48): Promise<
-    {
-      id: number;
-      brand_display_name: string;
-      tier: SponsorTier;
-      amount: number;
-      logo_url: string | null;
-      activity_title: string | null;
-      socials: { type: string; label: string; url: string }[];
-    }[]
-  > {
+  async listAllForHomepage(limit = 48): Promise<SponsorHomepageItem[]> {
     const sponsors = await this.paidSponsorsQueryBuilder(false)
       .orderBy('sponsor.amount', 'DESC')
       .addOrderBy('sponsor.created_at', 'DESC')
@@ -437,9 +528,12 @@ export class SponsorService {
       }
     }
 
+    const uniqueSponsors = Array.from(uniqueByBrand.values());
+    await this.ensureLinkSlugs(uniqueSponsors);
+
     const activityIds = Array.from(
       new Set(
-        Array.from(uniqueByBrand.values())
+        uniqueSponsors
           .map((s) => s.activity_id)
           .filter(Boolean),
       ),
@@ -452,9 +546,9 @@ export class SponsorService {
       activityMap.set(act.id, act);
     }
 
-    const sorted = Array.from(uniqueByBrand.values()).sort((a, b) => {
-      const scoreA = tierRank[a.tier] * 1_000_000 + Number(a.amount);
-      const scoreB = tierRank[b.tier] * 1_000_000 + Number(b.amount);
+    const sorted = uniqueSponsors.sort((a, b) => {
+      const scoreA = (tierRank[a.tier] ?? 0) * 1_000_000 + Number(a.amount);
+      const scoreB = (tierRank[b.tier] ?? 0) * 1_000_000 + Number(b.amount);
       return scoreB - scoreA;
     });
 
@@ -465,23 +559,76 @@ export class SponsorService {
       amount: Number(s.amount),
       logo_url: s.logo_url,
       activity_title: activityMap.get(s.activity_id)?.title ?? null,
+      link_slug: this.publicLinkSlug(s),
       socials: this.parseSocialLinks(s.social_links_json),
     }));
   }
 
-  private parseSocialLinks(json: string | null): { type: string; label: string; url: string }[] {
+  /** slug ที่ใช้ใน URL สาธารณะ */
+  publicLinkSlug(sponsor: Pick<SponsorRegistration, 'link_slug' | 'sponsor_no'>): string {
+    return (sponsor.link_slug || sponsor.sponsor_no).trim();
+  }
+
+  private async ensureLinkSlugs(sponsors: SponsorRegistration[]): Promise<void> {
+    const missing = sponsors.filter((s) => !s.link_slug?.trim());
+    for (const sponsor of missing) {
+      sponsor.link_slug = await this.ensureUniqueLinkSlug(
+        sponsor.brand_display_name || sponsor.sponsor_no,
+        sponsor.id,
+      );
+    }
+    if (missing.length) {
+      await this.sponsorRepo.save(missing);
+    }
+  }
+
+  private async ensureUniqueLinkSlug(
+    raw: string,
+    excludeId?: number,
+  ): Promise<string> {
+    const base = slugifySponsor(raw) || 'sponsor';
+    let candidate = base.slice(0, 100);
+    let n = 2;
+    while (n < 1000) {
+      const existing = await this.sponsorRepo.findOne({
+        where: { link_slug: candidate },
+      });
+      if (!existing || (excludeId != null && existing.id === excludeId)) {
+        return candidate;
+      }
+      const suffix = `-${n++}`;
+      candidate = `${base.slice(0, Math.max(1, 100 - suffix.length))}${suffix}`;
+    }
+    throw new BadRequestException('ไม่สามารถสร้างลิงก์สาธารณะได้');
+  }
+
+  private serializeSocialLinks(
+    socials?: SponsorSocialLink[] | null,
+  ): string | null {
+    const cleaned = this.normalizeSocialLinks(socials);
+    return cleaned.length ? JSON.stringify(cleaned) : null;
+  }
+
+  private normalizeSocialLinks(
+    socials?: SponsorSocialLink[] | null,
+  ): SponsorSocialLink[] {
+    if (!socials?.length) return [];
+    return socials
+      .map((v) => ({
+        type: String(v.type || '').trim(),
+        label: String(v.label || '').trim(),
+        url: String(v.url || '').trim(),
+      }))
+      .filter((v) => v.type && v.label && v.url)
+      .slice(0, MAX_SPONSOR_LINKS);
+  }
+
+  private parseSocialLinks(json: string | null): SponsorSocialLink[] {
     if (!json) return [];
     try {
       const parsed = JSON.parse(json);
       if (!Array.isArray(parsed)) return [];
-      return parsed
-        .slice(0, 2)
-        .map((v: any) => ({
-          type: String(v.type || '').trim(),
-          label: String(v.label || '').trim(),
-          url: String(v.url || '').trim(),
-        }))
-        .filter((v) => v.type && v.label && v.url);
+      return this.normalizeSocialLinks(parsed);
     } catch {
       return [];
     }

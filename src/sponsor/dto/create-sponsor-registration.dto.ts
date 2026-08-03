@@ -86,12 +86,12 @@ export class CreateSponsorRegistrationDto {
   payment_slip?: string;
 
   /**
-   * ช่องทาง social media สูงสุด 2 ช่องทาง
+   * ช่องทาง social / LinkTree สูงสุด 8 ลิงก์
    */
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => SponsorSocialDto)
-  @ArrayMaxSize(2)
+  @ArrayMaxSize(8)
   socials?: SponsorSocialDto[];
 }
 

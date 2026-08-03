@@ -69,11 +69,23 @@ export class SponsorRegistration {
   tax_id: string | null;
 
   /**
-   * ช่องทาง Social media ที่แสดงบนหน้าแรก
+   * ช่องทาง Social media / LinkTree
    * เก็บเป็น JSON string ของ array [{ type, label, url }]
    */
   @Column({ type: 'text', nullable: true })
   social_links_json: string | null;
+
+  /**
+   * slug สำหรับหน้า LinkTree สาธารณะ เช่น /s/my-brand
+   * ถ้ายังไม่มี ระบบจะใช้ sponsor_no เป็น fallback
+   */
+  @Column({
+    type: 'varchar',
+    length: 120,
+    unique: true,
+    nullable: true,
+  })
+  link_slug: string | null;
 
   /**
    * ให้แสดงโลโก้/ชื่อบนหน้าแรกหรือไม่ (Admin เป็นคนเลือก)
