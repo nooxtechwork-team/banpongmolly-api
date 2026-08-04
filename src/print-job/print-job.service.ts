@@ -265,7 +265,10 @@ export class PrintJobService {
     return lines.join('\n');
   }
 
-  /** ข้อความใบคืนปลา (ให้ตรงแนว slip บน Sunmi) */
+  /**
+   * ข้อความใบรับปลาคืน — ให้ตรง slip บน Sunmi POS
+   * แสดง queue_code (เช่น A001) เดียวกับจอ POS
+   */
   buildFishReturnSlip(opts: {
     queueCode: string;
     applicantName: string | null;
@@ -277,47 +280,45 @@ export class PrintJobService {
       registration_no: string | null;
     }>;
   }): string {
-    const when = new Date().toLocaleString('th-TH', { hour12: false });
-    const code = (opts.queueCode || '').trim() || '-';
+    const when = new Date().toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const queueLabel = (opts.queueCode || '').trim() || '-';
     const customer = (opts.applicantName || '').trim() || '-';
-    const staff = (opts.staffName || '').trim() || '-';
     const lines: string[] = [
-      'Banpong Molly',
-      'ใบคืนปลา',
-      '--------------------------------',
-      'หมายเลขคิว',
-      code,
-      '--------------------------------',
-      'รายการโหลปลา (entry_code)',
-      '--------------------------------',
+      '===============================',
+      'BANPONG MOLLY',
+      'ใบรับปลาคืน',
+      '===============================',
+      `คิว : ${queueLabel}`,
+      '',
+      'ลูกค้า',
+      customer,
+      '---------------------------------',
+      'หมายเลขโหลปลา',
     ];
     if (!opts.items.length) {
-      lines.push('  (ไม่มีรายการ)');
+      lines.push('(ไม่มีรายการ)');
     } else {
       opts.items.forEach((it, i) => {
         lines.push(`${i + 1}. ${it.entry_code || '-'}`);
-        const detailParts: string[] = [];
-        if (it.package_name) detailParts.push(it.package_name);
-        if (it.registration_no) detailParts.push(it.registration_no);
-        if (detailParts.length) lines.push(`   ${detailParts.join(' · ')}`);
       });
     }
-    lines.push('--------------------------------');
-    lines.push(`รวม ${opts.items.length} รายการ`);
-    if (opts.note) lines.push(`หมายเหตุ: ${opts.note}`);
-    lines.push('--------------------------------');
+    lines.push(`รวม ${opts.items.length} ตัว`);
+    if (opts.note?.trim()) lines.push(`หมายเหตุ: ${opts.note.trim()}`);
+    lines.push('---------------------------------');
+    lines.push('ลงชื่อ');
+    lines.push('ลูกค้า _______________');
     lines.push('');
-    lines.push('ลูกค้า / Customer');
-    lines.push(customer);
-    lines.push('ลายเซ็น: ____________________');
+    lines.push('เจ้าหน้าที่ _______________');
     lines.push('');
-    lines.push('พนักงาน / Staff');
-    lines.push(staff);
-    lines.push('ลายเซ็น: ____________________');
-    lines.push('--------------------------------');
-    lines.push(`เวลา ${when}`);
-    lines.push('ขอบคุณครับ');
-    lines.push('================================');
+    lines.push(when);
+    lines.push('===============================');
     lines.push('');
     lines.push('');
     return lines.join('\n');
