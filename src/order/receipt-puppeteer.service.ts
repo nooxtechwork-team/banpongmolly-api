@@ -56,21 +56,46 @@ export class ReceiptPuppeteerService implements OnModuleDestroy {
 
   /**
    * HTML ใบเสร็จเป็น inline + system font — ไม่ต้องรอ networkidle
+   * ใช้คิวทีละงาน เพื่อไม่ให้ newPage ซ้อนกันจน Chromium หลุดการเชื่อมต่อ
    */
+  private pdfQueue: Promise<void> = Promise.resolve();
+
   async htmlToPdfBuffer(html: string): Promise<Uint8Array> {
-    const browser = await this.getBrowser();
-    const page = await browser.newPage();
+    let result!: Uint8Array;
+    const run = async () => {
+      const browser = await this.getBrowser();
+      const page = await browser.newPage();
+      try {
+        page.setDefaultNavigationTimeout(120_000);
+        page.setDefaultTimeout(120_000);
+        await page.setContent(html, {
+          waitUntil: 'domcontentloaded',
+          timeout: 120_000,
+        });
+        const raw = await page.pdf({
+          format: 'A4',
+          preferCSSPageSize: true,
+          printBackground: true,
+          margin: { top: '0', bottom: '0', left: '0', right: '0' },
+          timeout: 120_000,
+        });
+        result = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+      } finally {
+        await page.close().catch(() => undefined);
+      }
+    };
+
+    const previous = this.pdfQueue;
+    let release!: () => void;
+    this.pdfQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
     try {
-      await page.setContent(html, { waitUntil: 'domcontentloaded' });
-      const raw = await page.pdf({
-        format: 'A4',
-        preferCSSPageSize: true,
-        printBackground: true,
-        margin: { top: '0', bottom: '0', left: '0', right: '0' },
-      });
-      return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+      await run();
+      return result;
     } finally {
-      await page.close().catch(() => undefined);
+      release();
     }
   }
 

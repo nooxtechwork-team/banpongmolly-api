@@ -10,6 +10,7 @@ import { ReportService } from './report.service';
 import { ReportController } from './report.controller';
 import { ActivityPackageCountsController } from './activity-package-counts.controller';
 import { CheckInOutReportController } from './check-in-out.controller';
+import { FishRankingSheetController } from './fish-ranking-sheet.controller';
 import { ActivityRegistrationModule } from '../activity-registration/activity-registration.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { ActivityRegistrationModule } from '../activity-registration/activity-re
     ReportController,
     ActivityPackageCountsController,
     CheckInOutReportController,
+    FishRankingSheetController,
   ],
   providers: [ReportService],
   exports: [ReportService],

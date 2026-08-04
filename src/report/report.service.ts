@@ -136,6 +136,30 @@ export interface ActivityPaidPackageCountItemDetailResponse {
   total_items: number;
 }
 
+/** แถวหนึ่งตัวปลาในใบจัดอันดับ (manual) */
+export interface FishRankingSheetRow {
+  seq: number;
+  applicant_name: string;
+  order_no: string | null;
+  entry_code: string;
+  registration_id: number;
+  registered_at: string;
+}
+
+export interface FishRankingSheetClassBlock {
+  package_id: number;
+  slug: string | null;
+  path_label: string;
+  fish_count: number;
+  rows: FishRankingSheetRow[];
+}
+
+export interface FishRankingSheetResponse {
+  activity: { id: number; title: string };
+  classes: FishRankingSheetClassBlock[];
+  total_fish: number;
+}
+
 type EntryJsonRow = {
   index?: string;
   package_id?: number;
@@ -1562,5 +1586,335 @@ export class ReportService {
       base = base.slice(0, maxBaseLen).trim();
     }
     return `${base}${stampSuffix}.pdf`;
+  }
+
+  /**
+   * ใบจัดอันดับปลา (manual) — เรียงตามคลาส แล้วตามชื่อผู้สมัคร / Order / รหัสปลา
+   * ใช้หลังลงปลาเสร็จ เพื่อให้ staff กรอกอันดับ + ลูกค้าเซ็นบนกระดาษ
+   */
+  async getFishRankingSheet(
+    activityId: number,
+    packageId?: number,
+  ): Promise<FishRankingSheetResponse> {
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId },
+    });
+    if (!activity) {
+      throw new NotFoundException('ไม่พบกิจกรรม');
+    }
+
+    const raws = await this.registrationRepository
+      .createQueryBuilder('reg')
+      .innerJoin(
+        Order,
+        'o',
+        'o.refer_id = reg.id AND o.type = :otype AND o.status = :paid',
+        {
+          otype: OrderType.ACTIVITY_REGISTRATION,
+          paid: OrderStatus.PAID,
+        },
+      )
+      .where('reg.activity_id = :aid', { aid: activityId })
+      .select('reg.id', 'registration_id')
+      .addSelect('reg.applicant_name', 'applicant_name')
+      .addSelect('reg.created_at', 'registered_at')
+      .addSelect('o.order_no', 'order_no')
+      .orderBy('reg.created_at', 'ASC')
+      .getRawMany();
+
+    const linesMap = await this.entryService.findLinesMapByRegistrationIds(
+      (raws || []).map((r) => Number(r.registration_id)),
+    );
+
+    type DraftRow = {
+      package_id: number;
+      applicant_name: string;
+      order_no: string | null;
+      entry_code: string;
+      registration_id: number;
+      registered_at: string;
+    };
+
+    const uniqueProbeIds = new Set<number>();
+    for (const r of raws || []) {
+      const entries = this.toEntryJsonRows(
+        this.linesForReportRow(r, linesMap),
+      );
+      for (const e of entries) {
+        const pid = Number(e.package_id);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        if (packageId != null && pid !== packageId) continue;
+        uniqueProbeIds.add(pid);
+      }
+    }
+    const uniqueIds = [...uniqueProbeIds];
+    const slugPathMap =
+      uniqueIds.length > 0
+        ? await this.buildPackageSlugPathFromLayer2Map(uniqueIds)
+        : new Map<number, string>();
+    const pathMap =
+      uniqueIds.length > 0
+        ? await this.buildPackageNamePathMap(uniqueIds)
+        : new Map<number, string>();
+    const packages =
+      uniqueIds.length > 0
+        ? await this.activityPackageRepository.find({
+            where: { id: In(uniqueIds), deleted_at: IsNull() },
+          })
+        : [];
+    const slugById = new Map<number, string | null>();
+    for (const p of packages) {
+      slugById.set(p.id, p.slug ?? null);
+    }
+
+    const drafts: DraftRow[] = [];
+    for (const r of raws || []) {
+      const registrationId = Number(r.registration_id);
+      const applicantName =
+        String(r.applicant_name ?? '').trim() || 'ไม่ระบุชื่อ';
+      const orderNo =
+        r.order_no != null && String(r.order_no).trim() !== ''
+          ? String(r.order_no).trim()
+          : null;
+      const registeredAt =
+        this.toIsoOrNull(r.registered_at) ?? new Date(0).toISOString();
+      const entries = this.toEntryJsonRows(
+        this.linesForReportRow(r, linesMap),
+      );
+      for (const e of entries) {
+        const pid = Number(e.package_id);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        if (packageId != null && pid !== packageId) continue;
+        const idxStr =
+          e.index != null && String(e.index).trim() !== ''
+            ? String(e.index).trim()
+            : '';
+        if (!idxStr) continue;
+        const slugPath = slugPathMap.get(pid) ?? null;
+        const entryCode = buildActivityRegistrationEntryCode(slugPath, idxStr);
+        const qty = Math.max(1, Number(e.quantity) || 1);
+        for (let i = 0; i < qty; i++) {
+          drafts.push({
+            package_id: pid,
+            applicant_name: applicantName,
+            order_no: orderNo,
+            entry_code: entryCode,
+            registration_id: registrationId,
+            registered_at: registeredAt,
+          });
+        }
+      }
+    }
+
+    const byPackage = new Map<number, DraftRow[]>();
+    for (const row of drafts) {
+      const list = byPackage.get(row.package_id) ?? [];
+      list.push(row);
+      byPackage.set(row.package_id, list);
+    }
+
+    const classes: FishRankingSheetClassBlock[] = [];
+    for (const pid of uniqueIds) {
+      const list = byPackage.get(pid) ?? [];
+      list.sort((a, b) => {
+        const nameCmp = a.applicant_name.localeCompare(b.applicant_name, 'th', {
+          sensitivity: 'base',
+        });
+        if (nameCmp !== 0) return nameCmp;
+        const ta = new Date(a.registered_at).getTime();
+        const tb = new Date(b.registered_at).getTime();
+        if (ta !== tb) return ta - tb;
+        if (a.registration_id !== b.registration_id) {
+          return a.registration_id - b.registration_id;
+        }
+        const orderA = a.order_no ?? '';
+        const orderB = b.order_no ?? '';
+        const orderCmp = orderA.localeCompare(orderB, 'th', { numeric: true });
+        if (orderCmp !== 0) return orderCmp;
+        return a.entry_code.localeCompare(b.entry_code, 'th', { numeric: true });
+      });
+
+      const rows: FishRankingSheetRow[] = list.map((row, idx) => ({
+        seq: idx + 1,
+        applicant_name: row.applicant_name,
+        order_no: row.order_no,
+        entry_code: row.entry_code,
+        registration_id: row.registration_id,
+        registered_at: row.registered_at,
+      }));
+
+      classes.push({
+        package_id: pid,
+        slug: slugById.get(pid) ?? null,
+        path_label:
+          pathMap.get(pid) ??
+          packages.find((x) => x.id === pid)?.name ??
+          `Package #${pid}`,
+        fish_count: rows.length,
+        rows,
+      });
+    }
+
+    classes.sort((a, b) => {
+      const sa = a.slug?.trim() ?? '';
+      const sb = b.slug?.trim() ?? '';
+      if (sa && !sb) return -1;
+      if (!sa && sb) return 1;
+      const c = sa.localeCompare(sb, 'th', { numeric: true });
+      if (c !== 0) return c;
+      return a.path_label.localeCompare(b.path_label, 'th');
+    });
+
+    const totalFish = classes.reduce((sum, c) => sum + c.fish_count, 0);
+    return {
+      activity: { id: activity.id, title: activity.title },
+      classes,
+      total_fish: totalFish,
+    };
+  }
+
+  private resolveFishRankingSheetPdfTemplate(): string {
+    const name = 'fish-ranking-sheet-pdf.html';
+    const candidates = [
+      path.join(__dirname, 'templates', name),
+      path.join(process.cwd(), 'dist', 'report', 'templates', name),
+      path.join(process.cwd(), 'src', 'report', 'templates', name),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p, 'utf8');
+      }
+    }
+    throw new Error(`Missing PDF template: ${name}`);
+  }
+
+  private buildFishRankingSheetPdfBodyHtml(
+    classes: FishRankingSheetClassBlock[],
+    meta: {
+      activityTitle: string;
+      scopeLabel: string;
+      generatedAt: string;
+      totalFish: number;
+    },
+  ): string {
+    const esc = (s: string) => this.escapeHtmlForPdf(s);
+    const parts: string[] = [];
+    if (!classes.length) {
+      parts.push('<p class="muted">ยังไม่มีรายการปลาที่ชำระเงินแล้ว</p>');
+      return parts.join('\n');
+    }
+
+    classes.forEach((block, idx) => {
+      const blockCls = idx > 0 ? 'class-block page-break' : 'class-block';
+      parts.push(`<div class="${blockCls}">`);
+
+      parts.push('<div class="sheet-banner">');
+      parts.push(`<h1 class="doc-title">${esc(meta.activityTitle)}</h1>`);
+      parts.push(
+        `<div class="meta">ใบจัดอันดับปลา · ${esc(meta.scopeLabel)} · ${esc(meta.generatedAt)}</div>`,
+      );
+      parts.push('</div>');
+
+      parts.push('<div class="class-head">');
+      parts.push(
+        `<div class="class-head-title"><span class="label">คลาส:</span> ${esc(block.path_label)}${block.slug ? ` <span class="slug">(${esc(block.slug)})</span>` : ''}</div>`,
+      );
+      parts.push(
+        `<div class="class-head-meta">ลำดับ 1–${esc(String(block.fish_count))} · ${esc(String(block.fish_count))} ตัว</div>`,
+      );
+      parts.push('</div>');
+
+      parts.push('<table class="ranking-table">');
+      parts.push(
+        '<colgroup><col style="width:42px"><col style="width:22%"><col style="width:15%"><col style="width:16%"><col style="width:72px"><col style="width:18%"></colgroup>',
+      );
+      parts.push('<thead><tr>');
+      parts.push(
+        '<th class="col-seq">ลำดับ</th>',
+        '<th class="col-name">ชื่อผู้สมัคร</th>',
+        '<th class="col-order">Order ผู้สมัคร</th>',
+        '<th class="col-code">รหัสปลา</th>',
+        '<th class="col-rank">อันดับ</th>',
+        '<th class="col-sign">เซ็นลูกค้า</th>',
+      );
+      parts.push('</tr></thead><tbody>');
+
+      if (!block.rows.length) {
+        parts.push(
+          '<tr><td colspan="6" class="muted">ไม่มีรายการในคลาสนี้</td></tr>',
+        );
+      } else {
+        for (const row of block.rows) {
+          parts.push('<tr>');
+          parts.push(
+            `<td class="col-seq">${esc(String(row.seq))}</td>`,
+            `<td class="col-name">${esc(row.applicant_name)}</td>`,
+            `<td class="col-order">${esc(row.order_no || `#${row.registration_id}`)}</td>`,
+            `<td class="col-code">${esc(row.entry_code)}</td>`,
+            '<td class="col-rank blank-cell"><div class="blank-rank"></div></td>',
+            '<td class="col-sign blank-cell"><div class="blank-sign"></div></td>',
+          );
+          parts.push('</tr>');
+        }
+      }
+
+      parts.push('</tbody></table>');
+      parts.push(
+        '<div class="sheet-note">Staff กรอกคอลัมน์อันดับ · ให้ลูกค้าเซ็นในคอลัมน์เซ็นลูกค้า</div>',
+      );
+      parts.push('</div>');
+    });
+
+    return parts.join('\n');
+  }
+
+  async generateFishRankingSheetPdf(
+    activityId: number,
+    packageId?: number,
+  ): Promise<{ pdf: Uint8Array; filename: string }> {
+    const data = await this.getFishRankingSheet(activityId, packageId);
+    if (!data.classes.length || data.total_fish <= 0) {
+      throw new NotFoundException(
+        'ยังไม่มีรายการปลาที่ชำระเงินแล้วสำหรับพิมพ์ใบจัดอันดับ',
+      );
+    }
+
+    const generatedAt = new Date().toLocaleString('th-TH', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const scopeLabel =
+      packageId != null
+        ? `พิมพ์คลาสเดียว · รวม ${data.total_fish} ตัว`
+        : `พิมพ์ทุกคลาส · รวม ${data.total_fish} ตัว · ${data.classes.length} คลาส`;
+    const bodyHtml = this.buildFishRankingSheetPdfBodyHtml(data.classes, {
+      activityTitle: data.activity.title,
+      scopeLabel,
+      generatedAt,
+      totalFish: data.total_fish,
+    });
+
+    let html = this.resolveFishRankingSheetPdfTemplate();
+    html = html.replace(/{{body}}/g, bodyHtml);
+
+    const pdf = await this.receiptPuppeteer.htmlToPdfBuffer(html);
+    const titleSeg = this.sanitizeActivityAttendancePdfFilenameSegment(
+      data.activity.title,
+    );
+    const filenameParts =
+      packageId != null && data.classes[0]
+        ? [
+            'ranking-sheet',
+            this.sanitizeActivityAttendancePdfFilenameSegment(
+              data.classes[0].slug || data.classes[0].path_label,
+            ),
+            titleSeg,
+          ]
+        : ['ranking-sheet', 'all', titleSeg];
+    const filename = this.composeActivityAttendancePdfFilename(filenameParts);
+    return { pdf, filename };
   }
 }
