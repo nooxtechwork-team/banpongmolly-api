@@ -14,12 +14,15 @@ import { allocateFormattedActivityEntryIndices } from '../common/utils/activity-
 import { buildActivityRegistrationEntryCode } from '../common/utils/activity-registration-entry-code.util';
 
 export interface ActivityRegistrationEntryLine {
+  /** PK ของ activity_registration_entries — ใช้เลือกเช็คอิน/เช็คเอาท์ทีละตัว */
+  id?: number;
   index: string | null;
   entry_code?: string | null;
   package_id: number;
   quantity: number;
   unit_price: number;
   line_total: number;
+  checked_in_at?: string | null;
   checked_out_at?: string | null;
   checked_out_by_user_id?: number | null;
   checked_out_by_name?: string | null;
@@ -44,12 +47,14 @@ export class ActivityRegistrationEntryService {
     entity: ActivityRegistrationEntry,
   ): ActivityRegistrationEntryLine {
     return {
+      id: entity.id,
       index: entity.entry_index,
       entry_code: entity.entry_code,
       package_id: Number(entity.package_id),
       quantity: Number(entity.quantity) || 1,
       unit_price: Number(entity.unit_price),
       line_total: Number(entity.line_total),
+      checked_in_at: this.toIsoOrNull(entity.checked_in_at),
       checked_out_at: this.toIsoOrNull(entity.checked_out_at),
       checked_out_by_user_id: entity.checked_out_by_user_id,
       checked_out_by_name: entity.checked_out_by_name,
@@ -128,6 +133,77 @@ export class ActivityRegistrationEntryService {
       throw new NotFoundException('ไม่พบรายการตามเลขลำดับที่ระบุ');
     }
     return entry;
+  }
+
+  /**
+   * ใบสมัครที่เช็คอินแบบเก่า (ระดับใบ) — sync ให้ทุกรายการปลามี checked_in_at
+   */
+  async backfillLegacyEntryCheckIns(
+    registrationIds: number[],
+    checkedInAtByRegId: Map<number, Date>,
+  ): Promise<void> {
+    const unique = [...new Set(registrationIds.filter((id) => id > 0))];
+    if (!unique.length || !checkedInAtByRegId.size) return;
+
+    const rows = await this.entryRepository.find({
+      where: { registration_id: In(unique) },
+    });
+    const toSave: ActivityRegistrationEntry[] = [];
+    for (const row of rows) {
+      if (row.checked_in_at) continue;
+      const stamp = checkedInAtByRegId.get(row.registration_id);
+      if (!stamp) continue;
+      row.checked_in_at = stamp;
+      toSave.push(row);
+    }
+    if (toSave.length) {
+      await this.entryRepository.save(toSave);
+    }
+  }
+
+  async findEntitiesByIds(
+    entryIds: number[],
+  ): Promise<ActivityRegistrationEntry[]> {
+    const unique = [...new Set(entryIds.filter((id) => id > 0))];
+    if (!unique.length) return [];
+    return this.entryRepository.find({
+      where: { id: In(unique) },
+      order: { id: 'ASC' },
+    });
+  }
+
+  async markEntriesCheckedIn(
+    entryIds: number[],
+    at: Date,
+  ): Promise<ActivityRegistrationEntry[]> {
+    const rows = await this.findEntitiesByIds(entryIds);
+    const updated: ActivityRegistrationEntry[] = [];
+    for (const row of rows) {
+      if (row.checked_in_at) continue;
+      row.checked_in_at = at;
+      updated.push(row);
+    }
+    if (updated.length) {
+      await this.entryRepository.save(updated);
+    }
+    return updated;
+  }
+
+  async markAllEntriesCheckedInForRegistration(
+    registrationId: number,
+    at: Date,
+  ): Promise<number> {
+    const rows = await this.entryRepository.find({
+      where: { registration_id: registrationId },
+    });
+    let n = 0;
+    for (const row of rows) {
+      if (row.checked_in_at) continue;
+      row.checked_in_at = at;
+      n += 1;
+    }
+    if (n) await this.entryRepository.save(rows);
+    return n;
   }
 
   async createLines(
@@ -339,6 +415,7 @@ export class ActivityRegistrationEntryService {
       quantity: line.quantity,
       unit_price: line.unit_price,
       line_total: line.line_total,
+      checked_in_at: this.toDateOrNull(line.checked_in_at),
       checked_out_at: this.toDateOrNull(line.checked_out_at),
       checked_out_by_user_id:
         line.checked_out_by_user_id != null

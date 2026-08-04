@@ -43,6 +43,7 @@ export class MyCheckInController {
   async confirmScan(
     @Request() req: { user: User },
     @Body('code') code?: string,
+    @Body('entry_ids') entryIds?: number[],
     @Body('latitude') latitude?: number,
     @Body('longitude') longitude?: number,
   ) {
@@ -50,7 +51,12 @@ export class MyCheckInController {
       latitude != null && longitude != null
         ? { latitude: Number(latitude), longitude: Number(longitude) }
         : undefined;
-    return this.checkInService.confirmSelfCheckIn(req.user.id, code ?? '', coords);
+    return this.checkInService.confirmSelfCheckIn(
+      req.user.id,
+      code ?? '',
+      Array.isArray(entryIds) ? entryIds : [],
+      coords,
+    );
   }
 
   @Post('activities/:activityId/scan')
@@ -58,6 +64,7 @@ export class MyCheckInController {
     @Request() req: { user: User },
     @Param('activityId', ParseIntPipe) activityId: number,
     @Body('code') code?: string,
+    @Body('entry_ids') entryIds?: number[],
     @Body('latitude') latitude?: number,
     @Body('longitude') longitude?: number,
   ) {
@@ -69,6 +76,7 @@ export class MyCheckInController {
       req.user.id,
       activityId,
       code ?? '',
+      Array.isArray(entryIds) ? entryIds : [],
       coords,
     );
   }

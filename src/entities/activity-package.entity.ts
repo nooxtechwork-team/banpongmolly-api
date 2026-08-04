@@ -27,6 +27,14 @@ export class ActivityPackage {
   @Column({ type: 'tinyint', default: 1 })
   is_active: boolean;
 
+  /** FK → fish_generations.id (รุ่น เช่น Senior/Junior) */
+  @Column({ type: 'int', nullable: true })
+  generation_id: number | null;
+
+  /** FK → fish_genders.id (เพศ เช่น ตัวผู้/ตัวเมีย) */
+  @Column({ type: 'int', nullable: true })
+  gender_id: number | null;
+
   @CreateDateColumn()
   created_at: Date;
 

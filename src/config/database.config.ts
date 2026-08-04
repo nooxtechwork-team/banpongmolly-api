@@ -35,6 +35,8 @@ import { PolicyAcceptance } from '../entities/policy-acceptance.entity';
 import { EntryPopupConfig } from '../entities/entry-popup-config.entity';
 import { HeroBannerSlide } from '../entities/hero-banner-slide.entity';
 import { SponsorTierLookup } from '../entities/sponsor-tier.entity';
+import { FishGeneration } from '../entities/fish-generation.entity';
+import { FishGender } from '../entities/fish-gender.entity';
 import { PrintJob } from '../entities/print-job.entity';
 import { CheckoutDevice } from '../entities/checkout-device.entity';
 import { CheckoutTicket } from '../entities/checkout-ticket.entity';
@@ -91,6 +93,8 @@ export const getDatabaseConfig = (
     EntryPopupConfig,
     HeroBannerSlide,
     SponsorTierLookup,
+    FishGeneration,
+    FishGender,
     PrintJob,
     CheckoutDevice,
     CheckoutTicket,

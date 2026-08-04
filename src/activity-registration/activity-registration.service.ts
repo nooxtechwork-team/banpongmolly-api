@@ -15,11 +15,7 @@ import {
 } from '../entities/activity-class-change-request.entity';
 import { ActivityClassChangeLog } from '../entities/activity-class-change-log.entity';
 import { Activity, ActivityStatus } from '../entities/activity.entity';
-import {
-  Order,
-  OrderStatus,
-  OrderType,
-} from '../entities/order.entity';
+import { Order, OrderStatus, OrderType } from '../entities/order.entity';
 import { ActivityPackage } from '../entities/activity-package.entity';
 import { User } from '../entities/user.entity';
 import { ChangeRegistrationClassDto } from './dto/change-registration-class.dto';
@@ -149,9 +145,8 @@ export class ActivityRegistrationService {
     this.assertCanChangeClass(registration, activity, order);
 
     const entryIndex = dto.entry_index.trim();
-    const entries = await this.entryService.resolveLinesForRegistration(
-      registration,
-    );
+    const entries =
+      await this.entryService.resolveLinesForRegistration(registration);
     const entry = entries.find((e) => e.index === entryIndex);
     if (!entry) {
       throw new NotFoundException('ไม่พบรายการตามเลขลำดับที่ระบุ');
@@ -161,7 +156,9 @@ export class ActivityRegistrationService {
       entry.checked_out_at != null &&
       String(entry.checked_out_at).trim() !== ''
     ) {
-      throw new BadRequestException('รายการนี้ checkout แล้ว ไม่สามารถเปลี่ยนคลาสได้');
+      throw new BadRequestException(
+        'รายการนี้ checkout แล้ว ไม่สามารถเปลี่ยนคลาสได้',
+      );
     }
 
     const leaf = await this.resolveLeafClass(activity, dto.new_package_id);
@@ -319,7 +316,8 @@ export class ActivityRegistrationService {
           packageNameById.get(row.new_package_id) ??
           `แพ็กเกจ #${row.new_package_id}`,
         reason: row.reason,
-        at: this.toIsoOrNull(row.requested_at) ?? row.requested_at.toISOString(),
+        at:
+          this.toIsoOrNull(row.requested_at) ?? row.requested_at.toISOString(),
       });
     }
 
@@ -594,9 +592,8 @@ export class ActivityRegistrationService {
     adminUserId: number,
   ): Promise<ActivityRegistration> {
     const entryIndex = dto.entry_index.trim();
-    const entries = await this.entryService.resolveLinesForRegistration(
-      registration,
-    );
+    const entries =
+      await this.entryService.resolveLinesForRegistration(registration);
     const oldEntry = entries.find((e) => e.index === entryIndex);
     if (!oldEntry) {
       throw new NotFoundException('ไม่พบรายการตามเลขลำดับที่ระบุ');
@@ -606,7 +603,9 @@ export class ActivityRegistrationService {
       oldEntry.checked_out_at != null &&
       String(oldEntry.checked_out_at).trim() !== ''
     ) {
-      throw new BadRequestException('รายการนี้ checkout แล้ว ไม่สามารถเปลี่ยนคลาสได้');
+      throw new BadRequestException(
+        'รายการนี้ checkout แล้ว ไม่สามารถเปลี่ยนคลาสได้',
+      );
     }
 
     const leaf = await this.resolveLeafClass(activity, dto.new_package_id);
@@ -620,10 +619,7 @@ export class ActivityRegistrationService {
         leaf.id,
       ]);
     const slugPath = slugPaths.get(leaf.id) ?? null;
-    const entryCode = buildActivityRegistrationEntryCode(
-      slugPath,
-      entryIndex,
-    );
+    const entryCode = buildActivityRegistrationEntryCode(slugPath, entryIndex);
 
     const changedAt = new Date();
 
@@ -790,7 +786,9 @@ export class ActivityRegistrationService {
     };
   }
 
-  private toClassChangeActivityItem(activity: Activity): ClassChangeActivityItem {
+  private toClassChangeActivityItem(
+    activity: Activity,
+  ): ClassChangeActivityItem {
     return {
       activity_id: activity.id,
       title: activity.title ?? '',
@@ -805,7 +803,8 @@ export class ActivityRegistrationService {
           : String(activity.end_date ?? ''),
       location_name: activity.location_name ?? '',
       cover_image:
-        activity.cover_image != null && String(activity.cover_image).trim() !== ''
+        activity.cover_image != null &&
+        String(activity.cover_image).trim() !== ''
           ? String(activity.cover_image).trim()
           : null,
     };
@@ -1125,7 +1124,8 @@ export class ActivityRegistrationService {
     registrationId: number,
     entryIndex: string,
     entryId: number,
-    repository: Repository<ActivityClassChangeRequest> = this.classChangeRequestRepository,
+    repository: Repository<ActivityClassChangeRequest> = this
+      .classChangeRequestRepository,
   ): Promise<ActivityClassChangeRequest | null> {
     const byEntryId = await repository.findOne({
       where: {

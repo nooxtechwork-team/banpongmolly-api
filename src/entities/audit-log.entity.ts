@@ -25,6 +25,8 @@ export type AuditEntityType =
   | 'sponsor_package'
   | 'activity'
   | 'activity_package'
+  | 'fish_generation'
+  | 'fish_gender'
   | 'province'
   | 'organizer'
   | 'news'

@@ -26,4 +26,12 @@ export class UpdateActivityPackageDto {
   @IsOptional()
   @IsNumber()
   price?: number;
+
+  @IsOptional()
+  @IsInt()
+  generation_id?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  gender_id?: number | null;
 }

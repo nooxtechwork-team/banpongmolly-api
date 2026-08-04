@@ -13,6 +13,8 @@ export interface ActivityPackageWithPrice {
   parent_id: number | null;
   sort_order: number;
   is_active: boolean;
+  generation_id: number | null;
+  gender_id: number | null;
   price?: number | null;
 }
 
@@ -170,6 +172,8 @@ export class ActivityPackageService {
         sort_order: c.sort_order,
         is_active: c.is_active,
         parent_id: c.parent_id,
+        generation_id: c.generation_id ?? null,
+        gender_id: c.gender_id ?? null,
         price: c.price ?? null,
         children: [],
       });
@@ -252,6 +256,8 @@ export class ActivityPackageService {
       parent_id: dto.parent_id ?? null,
       sort_order: dto.sort_order ?? 0,
       is_active: dto.is_active ?? true,
+      generation_id: dto.generation_id ?? null,
+      gender_id: dto.gender_id ?? null,
     });
     const saved = await this.packageRepository.save(pkg);
     await this.setSinglePrice(saved.id, dto.price);
@@ -287,6 +293,12 @@ export class ActivityPackageService {
     if (dto.parent_id !== undefined) existing.parent_id = dto.parent_id ?? null;
     if (dto.sort_order !== undefined) existing.sort_order = dto.sort_order;
     if (dto.is_active !== undefined) existing.is_active = dto.is_active;
+    if (dto.generation_id !== undefined) {
+      existing.generation_id = dto.generation_id ?? null;
+    }
+    if (dto.gender_id !== undefined) {
+      existing.gender_id = dto.gender_id ?? null;
+    }
 
     const saved = await this.packageRepository.save(existing);
     if (dto.price !== undefined) {

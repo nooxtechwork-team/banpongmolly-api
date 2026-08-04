@@ -473,11 +473,6 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
           'ทุกรายการต้องอยู่ในกิจกรรมเดียวกัน',
         );
       }
-      if (!reg.checked_in_at) {
-        throw new BadRequestException(
-          `ใบสมัคร ${reg.registration_no} ต้องเช็คอินที่งานก่อน`,
-        );
-      }
     }
 
     const paidOrders = await this.orderRepo.find({
@@ -498,6 +493,13 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const entry of entries) {
+      const reg = regMap.get(entry.registration_id)!;
+      const entryCheckedIn = entry.checked_in_at || reg.checked_in_at;
+      if (!entryCheckedIn) {
+        throw new BadRequestException(
+          `รายการ ${entry.entry_code || entry.id} ต้องเช็คอินที่งานก่อน`,
+        );
+      }
       if (entry.checked_out_at) {
         throw new BadRequestException(
           `รายการ ${entry.entry_code || entry.id} checkout แล้ว`,
@@ -795,7 +797,7 @@ export class CheckoutQueueService implements OnModuleInit, OnModuleDestroy {
       .addSelect('reg.registration_no', 'registration_no')
       .addSelect('reg.applicant_name', 'applicant_name')
       .addSelect('reg.farm_name', 'farm_name')
-      .addSelect('reg.checked_in_at', 'checked_in_at')
+      .addSelect('COALESCE(ent.checked_in_at, reg.checked_in_at)', 'checked_in_at')
       .addSelect('reg.activity_id', 'activity_id')
       .addSelect('act.title', 'activity_title')
       .addSelect('act.slug', 'activity_slug')

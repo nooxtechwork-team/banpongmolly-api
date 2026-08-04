@@ -42,6 +42,9 @@ export class ActivityRegistrationEntry {
   @Column({ type: 'datetime', precision: 6, nullable: true })
   checked_out_at: Date | null;
 
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  checked_in_at: Date | null;
+
   @Column({ type: 'int', nullable: true })
   checked_out_by_user_id: number | null;
 

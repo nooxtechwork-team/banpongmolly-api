@@ -21,6 +21,7 @@ import { PaymentConfigModule } from './payment-config/payment-config.module';
 import { LegalModule } from './legal/legal.module';
 import { EntryPopupModule } from './entry-popup/entry-popup.module';
 import { HeroBannerModule } from './hero-banner/hero-banner.module';
+import { FishMasterModule } from './fish-master/fish-master.module';
 import { ReportModule } from './report/report.module';
 import { AccessLogModule } from './access-log/access-log.module';
 import { LoginLogModule } from './login-log/login-log.module';
@@ -67,6 +68,7 @@ import { getDatabaseConfig } from './config/database.config';
     LegalModule,
     EntryPopupModule,
     HeroBannerModule,
+    FishMasterModule,
     ReportModule,
   ],
   controllers: [AppController],

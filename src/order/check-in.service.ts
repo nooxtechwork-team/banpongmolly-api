@@ -69,7 +69,7 @@ export interface MyCheckInActivityItem {
   order_no: string | null;
   /** จำนวนใบสมัคร (ออเดอร์) ที่ชำระแล้วของกิจกรรมนี้ */
   registration_count: number;
-  /** จำนวนใบที่ยังไม่เช็คอิน */
+  /** จำนวนรายการปลาที่ยังไม่เช็คอิน */
   pending_count: number;
   checked_in_at: string | null;
   can_check_in: boolean;
@@ -80,11 +80,16 @@ export interface MyCheckInActivityItem {
 }
 
 export interface CheckInSelfPreviewEntry {
+  entry_id: number;
+  registration_id: number;
   package_name: string;
   quantity: number;
   unit_price: number;
   line_total: number;
   entry_code?: string | null;
+  entry_index?: string | null;
+  already_checked_in: boolean;
+  checked_in_at: string | null;
 }
 
 export interface CheckInSelfPreviewRegistration {
@@ -92,8 +97,10 @@ export interface CheckInSelfPreviewRegistration {
   registration_no: string;
   order_no: string | null;
   total_amount: number;
+  /** true เมื่อทุกรายการปลาในใบนี้เช็คอินแล้ว */
   already_checked_in: boolean;
   checked_in_at: string | null;
+  pending_entry_count: number;
   entries: CheckInSelfPreviewEntry[];
 }
 
@@ -107,9 +114,11 @@ export interface CheckInSelfPreview {
   total_amount: number;
   /** จำนวนใบสมัครทั้งหมดของกิจกรรมนี้ (ที่ชำระแล้ว) */
   registration_count: number;
-  /** จำนวนใบที่ยังไม่เช็คอิน */
+  /** จำนวนรายการปลาที่ยังไม่เช็คอิน */
   pending_count: number;
-  /** true เมื่อทุกใบเช็คอินแล้ว */
+  /** จำนวนรายการปลาทั้งหมด */
+  entry_count: number;
+  /** true เมื่อทุกรายการปลาเช็คอินแล้ว */
   already_checked_in: boolean;
   /** เวลาเช็คอินล่าสุด (ถ้ามี) */
   checked_in_at: string | null;
@@ -121,11 +130,11 @@ export interface CheckInSelfPreview {
 
 export interface CheckInSelfConfirmResult {
   activity_title: string;
-  /** จำนวนใบที่เช็คอินสำเร็จในครั้งนี้ */
+  /** จำนวนรายการปลาที่เช็คอินสำเร็จในครั้งนี้ */
   checked_in_count: number;
-  /** จำนวนใบที่เช็คอินไปแล้วก่อนหน้า */
+  /** จำนวนรายการที่เลือกแล้วแต่เช็คอินไปแล้วก่อนหน้า */
   already_count: number;
-  /** จำนวนใบสมัครทั้งหมดของกิจกรรมนี้ */
+  /** จำนวนรายการปลาทั้งหมดของกิจกรรมนี้ */
   total_count: number;
 }
 
@@ -387,8 +396,10 @@ export class CheckInService {
         'เช็คอินได้เฉพาะเมื่อชำระเงินแล้วเท่านั้น กรุณาอนุมัติการชำระเงินก่อน',
       );
     }
-    reg.checked_in_at = new Date();
+    const now = new Date();
+    reg.checked_in_at = now;
     await this.registrationRepository.save(reg);
+    await this.entryService.markAllEntriesCheckedInForRegistration(reg.id, now);
 
     this.checkInGateway.notifyTicketCheckedIn(reg.registration_no);
 
@@ -635,6 +646,8 @@ export class CheckInService {
     }
 
     const byActivity = new Map<number, ActivityGroup>();
+    const allRegIds: number[] = [];
+    const legacyCheckInByReg = new Map<number, Date>();
 
     for (const row of raws || []) {
       const activityId = Number(row.activity_id);
@@ -700,8 +713,19 @@ export class CheckInService {
         byActivity.set(activityId, group);
       }
 
+      const registrationId = Number(row.registration_id);
+      allRegIds.push(registrationId);
+      if (row.checked_in_at instanceof Date) {
+        legacyCheckInByReg.set(registrationId, row.checked_in_at);
+      } else if (checkedInAt) {
+        const d = new Date(checkedInAt);
+        if (!Number.isNaN(d.getTime())) {
+          legacyCheckInByReg.set(registrationId, d);
+        }
+      }
+
       group.regs.push({
-        registration_id: Number(row.registration_id),
+        registration_id: registrationId,
         registration_no: row.registration_no ?? '',
         order_no:
           row.order_no != null && String(row.order_no).trim() !== ''
@@ -711,10 +735,29 @@ export class CheckInService {
       });
     }
 
+    await this.entryService.backfillLegacyEntryCheckIns(
+      allRegIds,
+      legacyCheckInByReg,
+    );
+    const linesMap =
+      await this.entryService.findLinesMapByRegistrationIds(allRegIds);
+
     return [...byActivity.values()].map((group) => {
-      const pending = group.regs.filter((r) => !r.checked_in_at);
-      // ใบตัวแทน: ใช้ใบที่ยังไม่เช็คอินใบแรก (ถ้ามี) ไม่งั้นใบแรก
-      const representative = pending[0] ?? group.regs[0]!;
+      let pendingEntryCount = 0;
+      for (const reg of group.regs) {
+        const lines = linesMap.get(reg.registration_id) ?? [];
+        if (!lines.length) {
+          // ไม่มีรายการปลา — นับตามสถานะใบสมัครแบบเดิม
+          if (!reg.checked_in_at) pendingEntryCount += 1;
+          continue;
+        }
+        for (const line of lines) {
+          if (!line.checked_in_at) pendingEntryCount += 1;
+        }
+      }
+
+      const pendingRegs = group.regs.filter((r) => !r.checked_in_at);
+      const representative = pendingRegs[0] ?? group.regs[0]!;
       const latestCheckedIn =
         group.regs
           .map((r) => r.checked_in_at)
@@ -728,9 +771,9 @@ export class CheckInService {
         registration_no: representative.registration_no,
         order_no: representative.order_no,
         registration_count: group.regs.length,
-        pending_count: pending.length,
-        checked_in_at: pending.length ? null : latestCheckedIn,
-        can_check_in: pending.length > 0 && group.checkInWindow === 'open',
+        pending_count: pendingEntryCount,
+        checked_in_at: pendingEntryCount ? null : latestCheckedIn,
+        can_check_in: pendingEntryCount > 0 && group.checkInWindow === 'open',
         check_in_window: group.checkInWindow,
       };
     });
@@ -801,24 +844,40 @@ export class CheckInService {
       );
     }
 
-    // โหลดใบสมัคร + รายการปลาให้ครบก่อน แล้ว resolve ชื่อแพ็กเกจ (ตัวลูกสุด) ครั้งเดียว
     const loaded: {
       row: { registration_id: number; order_no: string | null };
       reg: ActivityRegistration;
       entryLines: ActivityRegistrationEntryLine[];
     }[] = [];
     const packageIdSet = new Set<number>();
+    const legacyCheckInByReg = new Map<number, Date>();
+
     for (const row of regRows) {
       const reg = await this.registrationRepository.findOne({
         where: { id: row.registration_id },
       });
       if (!reg) continue;
+      if (reg.checked_in_at) {
+        legacyCheckInByReg.set(reg.id, reg.checked_in_at);
+      }
       const entryLines =
         await this.entryService.resolveLinesForRegistration(reg);
       for (const line of entryLines) {
         packageIdSet.add(Number(line.package_id));
       }
       loaded.push({ row, reg, entryLines });
+    }
+
+    await this.entryService.backfillLegacyEntryCheckIns(
+      loaded.map((item) => item.reg.id),
+      legacyCheckInByReg,
+    );
+
+    // reload lines after backfill so checked_in_at สะท้อนสถานะจริง
+    for (const item of loaded) {
+      item.entryLines = await this.entryService.resolveLinesForRegistration(
+        item.reg,
+      );
     }
 
     const packageNameById = await this.entryService.resolvePackageLeafNames([
@@ -829,20 +888,39 @@ export class CheckInService {
     const allEntries: CheckInSelfPreviewEntry[] = [];
     let totalAmount = 0;
     let pendingCount = 0;
+    let entryCount = 0;
     let applicantName = '';
     let phone = '';
     let latestCheckedInAt: string | null = null;
 
     for (const { row, reg, entryLines } of loaded) {
       const entries = this.entryLinesToPreviewEntries(
+        reg.id,
         entryLines,
         packageNameById,
       );
-      const checkedInAt = reg.checked_in_at
+      const pendingInReg = entries.filter((e) => !e.already_checked_in).length;
+      const regCheckedInAt = reg.checked_in_at
         ? reg.checked_in_at.toISOString()
         : null;
-      const already = !!checkedInAt;
-      if (!already) pendingCount += 1;
+      const latestEntryCheckedIn =
+        entries
+          .map((e) => e.checked_in_at)
+          .filter((v): v is string => !!v)
+          .sort()
+          .at(-1) ?? null;
+      const checkedInAt = latestEntryCheckedIn ?? regCheckedInAt;
+      const already = entries.length
+        ? pendingInReg === 0
+        : !!regCheckedInAt;
+
+      pendingCount += entries.length
+        ? pendingInReg
+        : already
+          ? 0
+          : 1;
+      entryCount += entries.length || 1;
+
       if (
         checkedInAt &&
         (!latestCheckedInAt || checkedInAt > latestCheckedInAt)
@@ -860,6 +938,11 @@ export class CheckInService {
         total_amount: Number(reg.total_amount ?? 0),
         already_checked_in: already,
         checked_in_at: checkedInAt,
+        pending_entry_count: entries.length
+          ? pendingInReg
+          : already
+            ? 0
+            : 1,
         entries,
       });
       allEntries.push(...entries);
@@ -874,6 +957,7 @@ export class CheckInService {
       total_amount: totalAmount,
       registration_count: registrations.length,
       pending_count: pendingCount,
+      entry_count: allEntries.length || entryCount,
       already_checked_in: pendingCount === 0,
       checked_in_at: latestCheckedInAt,
       registrations,
@@ -884,37 +968,56 @@ export class CheckInService {
   async confirmSelfCheckIn(
     userId: number,
     code: string,
+    entryIds: number[],
     coords?: CheckInGeoCoords | null,
   ): Promise<CheckInSelfConfirmResult> {
     const activityId = parseActivityCheckInCode(code);
     if (activityId == null) {
       throw new BadRequestException('QR Code ไม่ถูกต้อง');
     }
-    return this.submitSelfCheckIn(userId, activityId, code, coords);
+    return this.submitSelfCheckIn(
+      userId,
+      activityId,
+      code,
+      entryIds,
+      coords,
+    );
   }
 
   private entryLinesToPreviewEntries(
+    registrationId: number,
     lines: ActivityRegistrationEntryLine[],
     packageNameById?: Map<number, string>,
   ): CheckInSelfPreviewEntry[] {
-    return lines.map((line) => {
+    const result: CheckInSelfPreviewEntry[] = [];
+    for (const line of lines) {
+      const entryId = Number(line.id);
+      if (!Number.isFinite(entryId) || entryId <= 0) continue;
       const pkgId = Number(line.package_id);
       const name =
         packageNameById?.get(pkgId) ?? (pkgId ? `แพ็กเกจ #${pkgId}` : '—');
-      return {
+      const checkedInAt = line.checked_in_at ?? null;
+      result.push({
+        entry_id: entryId,
+        registration_id: registrationId,
         package_name: name,
         quantity: Number(line.quantity) || 1,
         unit_price: Number(line.unit_price) || 0,
         line_total: Number(line.line_total) || 0,
         entry_code: line.entry_code != null ? String(line.entry_code) : null,
-      };
-    });
+        entry_index: line.index != null ? String(line.index) : null,
+        already_checked_in: !!checkedInAt,
+        checked_in_at: checkedInAt,
+      });
+    }
+    return result;
   }
 
   async submitSelfCheckIn(
     userId: number,
     activityId: number,
     code: string,
+    entryIds: number[],
     coords?: CheckInGeoCoords | null,
   ): Promise<CheckInSelfConfirmResult> {
     const parsedActivityId = parseActivityCheckInCode(code);
@@ -923,6 +1026,17 @@ export class CheckInService {
     }
     if (parsedActivityId !== activityId) {
       throw new BadRequestException('QR Code ไม่ตรงกับกิจกรรมที่เลือก');
+    }
+
+    const uniqueEntryIds = [
+      ...new Set(
+        (entryIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    ];
+    if (!uniqueEntryIds.length) {
+      throw new BadRequestException('กรุณาเลือกปลาที่ต้องการเช็คอิน');
     }
 
     const activity = await this.activityRepository.findOne({
@@ -945,39 +1059,79 @@ export class CheckInService {
       );
     }
 
-    const now = new Date();
-    let checkedInCount = 0;
-    let alreadyCount = 0;
-
-    // เช็คอินทุกใบสมัครของกิจกรรมนี้พร้อมกัน — ข้ามใบที่เช็คอินไปแล้ว
-    for (const row of regRows) {
+    const allowedRegIds = new Set(regRows.map((r) => r.registration_id));
+    const legacyCheckInByReg = new Map<number, Date>();
+    for (const regId of allowedRegIds) {
       const reg = await this.registrationRepository.findOne({
-        where: { id: row.registration_id },
+        where: { id: regId },
       });
-      if (!reg) continue;
-      if (reg.checked_in_at) {
-        alreadyCount += 1;
-        continue;
+      if (reg?.checked_in_at) {
+        legacyCheckInByReg.set(reg.id, reg.checked_in_at);
       }
-      reg.checked_in_at = now;
-      await this.registrationRepository.save(reg);
-      this.checkInGateway.notifyTicketCheckedIn(reg.registration_no);
-      checkedInCount += 1;
     }
+    await this.entryService.backfillLegacyEntryCheckIns(
+      [...allowedRegIds],
+      legacyCheckInByReg,
+    );
+
+    const entryRows =
+      await this.entryService.findEntitiesByIds(uniqueEntryIds);
+    if (entryRows.length !== uniqueEntryIds.length) {
+      throw new BadRequestException('พบรายการปลาที่ไม่ถูกต้อง');
+    }
+
+    for (const entry of entryRows) {
+      if (!allowedRegIds.has(entry.registration_id)) {
+        throw new BadRequestException(
+          'รายการปลาที่เลือกไม่อยู่ในใบสมัครของคุณสำหรับกิจกรรมนี้',
+        );
+      }
+    }
+
+    const allLinesMap =
+      await this.entryService.findLinesMapByRegistrationIds([
+        ...allowedRegIds,
+      ]);
+    let totalEntryCount = 0;
+    for (const lines of allLinesMap.values()) {
+      totalEntryCount += lines.length;
+    }
+
+    const now = new Date();
+    const alreadyCount = entryRows.filter((e) => !!e.checked_in_at).length;
+    const updated = await this.entryService.markEntriesCheckedIn(
+      uniqueEntryIds,
+      now,
+    );
+    const checkedInCount = updated.length;
 
     if (checkedInCount === 0) {
       throw new BadRequestException(
         alreadyCount > 0
-          ? 'ทุกใบสมัครของกิจกรรมนี้เช็คอินไปแล้ว'
-          : 'ไม่มีใบสมัครที่เช็คอินได้',
+          ? 'ปลาที่เลือกเช็คอินไปแล้ว'
+          : 'ไม่มีรายการปลาที่เช็คอินได้',
       );
+    }
+
+    // ตั้ง checked_in_at ระดับใบเมื่อมีปลาเช็คอินแล้วอย่างน้อย 1 ตัว
+    const touchedRegIds = [
+      ...new Set(updated.map((e) => e.registration_id)),
+    ];
+    for (const regId of touchedRegIds) {
+      const reg = await this.registrationRepository.findOne({
+        where: { id: regId },
+      });
+      if (!reg || reg.checked_in_at) continue;
+      reg.checked_in_at = now;
+      await this.registrationRepository.save(reg);
+      this.checkInGateway.notifyTicketCheckedIn(reg.registration_no);
     }
 
     return {
       activity_title: activity.title,
       checked_in_count: checkedInCount,
       already_count: alreadyCount,
-      total_count: regRows.length,
+      total_count: totalEntryCount || uniqueEntryIds.length,
     };
   }
 }
