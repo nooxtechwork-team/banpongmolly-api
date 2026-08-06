@@ -735,10 +735,8 @@ export class CheckInService {
       });
     }
 
-    await this.entryService.backfillLegacyEntryCheckIns(
-      allRegIds,
-      legacyCheckInByReg,
-    );
+    // list ไม่ต้อง write backfill ทุกครั้ง — นับ pending โดยยึด checked_in_at ของ entry
+    // หรือ legacy ระดับใบสมัคร (reg.checked_in_at) ถ้ามี
     const linesMap =
       await this.entryService.findLinesMapByRegistrationIds(allRegIds);
 
@@ -746,13 +744,14 @@ export class CheckInService {
       let pendingEntryCount = 0;
       for (const reg of group.regs) {
         const lines = linesMap.get(reg.registration_id) ?? [];
+        const legacyCheckedIn = legacyCheckInByReg.has(reg.registration_id);
         if (!lines.length) {
           // ไม่มีรายการปลา — นับตามสถานะใบสมัครแบบเดิม
           if (!reg.checked_in_at) pendingEntryCount += 1;
           continue;
         }
         for (const line of lines) {
-          if (!line.checked_in_at) pendingEntryCount += 1;
+          if (!line.checked_in_at && !legacyCheckedIn) pendingEntryCount += 1;
         }
       }
 
