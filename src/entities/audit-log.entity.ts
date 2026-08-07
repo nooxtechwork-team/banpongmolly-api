@@ -35,7 +35,9 @@ export type AuditEntityType =
   | 'banner_category'
   | 'banner_position'
   | 'banner_type'
-  | 'banner_status';
+  | 'banner_status'
+  | 'pos_apk_release'
+  | 'pos_apk_settings';
 
 @Entity('audit_logs')
 export class AuditLog {

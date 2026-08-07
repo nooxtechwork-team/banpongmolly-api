@@ -107,17 +107,14 @@ export class AuthController {
 
     const scope = encodeURIComponent('profile openid email');
 
-    let url =
+    // ให้เปิดแอป LINE เป็นหลัก (UX ดีบน browser) — ไม่ใส่ disable_auto_login
+    // หมายเหตุ: จาก PWA/home-screen shortcut อาจหลุดไป Safari หลัง login
+    const url =
       'https://access.line.me/oauth2/v2.1/authorize' +
       `?response_type=code&client_id=${encodeURIComponent(channelId)}` +
       `&redirect_uri=${encodeURIComponent(callbackUrl)}` +
       `&state=${encodeURIComponent(state)}` +
       `&scope=${scope}`;
-
-    // PWA: กัน LINE เด้งไปแอปแล้วเปิด Safari นอก standalone
-    if (isPwa) {
-      url += '&disable_auto_login=true';
-    }
 
     return res.redirect(302, url);
   }
