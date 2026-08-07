@@ -66,6 +66,25 @@ export class ActivityRegistrationEntry {
   @Column({ type: 'tinyint', nullable: true, default: 0 })
   ready_to_checkout: boolean | null;
 
+  /**
+   * สถานะถ่ายรูปสภาพปลา (ทางเลือก — ไม่บังคับถ่ายทุกตัว/ทุก order)
+   * เจ้าหน้าที่เลือกเองว่าจะถ่ายหรือตรวจตัวไหน · ค่าเริ่มต้น pending = ยังไม่ใช้ฟีเจอร์นี้กับตัวนั้น
+   * pending | photographed (มีภาพรอคอนเฟิร์ม) | confirmed (ล็อกถาวรหลังกดยืนยัน)
+   */
+  @Column({
+    type: 'varchar',
+    length: 32,
+    default: 'pending',
+  })
+  photo_status: 'pending' | 'photographed' | 'confirmed';
+
+  /** มีค่าเฉพาะเมื่อกดยืนยันภาพของตัวนี้แล้ว (optional flow) */
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  photo_confirmed_at: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  photo_confirmed_by_user_id: number | null;
+
   @CreateDateColumn()
   created_at: Date;
 
