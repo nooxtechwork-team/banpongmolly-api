@@ -608,8 +608,9 @@ export class ActivityService {
 
     // สถานะ: ใช้ enum จริงใน DB + logic "upcoming"
     if (options?.status === 'open') {
-      qb.andWhere('activity.status = :status', {
-        status: ActivityStatus.OPEN,
+      // แท็บเปิดรับสมัคร: แสดงทั้ง open และ upcoming (กำลังจะถึง)
+      qb.andWhere('activity.status IN (:...statuses)', {
+        statuses: [ActivityStatus.OPEN, ActivityStatus.UPCOMING],
       });
     } else if (options?.status === 'finished') {
       qb.andWhere('activity.status = :status', {
@@ -618,11 +619,16 @@ export class ActivityService {
     } else if (options?.status === 'upcoming') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      qb.andWhere('activity.status = :status', {
-        status: ActivityStatus.OPEN,
-      }).andWhere('activity.start_date >= :today', {
-        today: today.toISOString().slice(0, 10),
-      });
+      // รวมสถานะ upcoming ที่ตั้งมือ + งาน open ที่วันเริ่มยังไม่ถึง
+      qb.andWhere(
+        `(activity.status = :upcoming
+          OR (activity.status = :open AND activity.start_date >= :today))`,
+        {
+          upcoming: ActivityStatus.UPCOMING,
+          open: ActivityStatus.OPEN,
+          today: today.toISOString().slice(0, 10),
+        },
+      );
     }
 
     // Filter ตามจังหวัด

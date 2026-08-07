@@ -10,6 +10,8 @@ import {
 export enum ActivityStatus {
   DRAFT = 'draft',
   OPEN = 'open',
+  /** กำลังจะถึง / เร็ว ๆ นี้ — ตั้งมือได้ ยังไม่เปิดรับสมัคร */
+  UPCOMING = 'upcoming',
   CLOSED = 'closed',
   FINISHED = 'finished',
 }
