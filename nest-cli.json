@@ -5,8 +5,16 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "assets": [
-      "report/templates/**/*",
-      "order/templates/**/*"
+      {
+        "include": "order/templates/**/*",
+        "outDir": "dist/src",
+        "watchAssets": true
+      },
+      {
+        "include": "report/templates/**/*",
+        "outDir": "dist/src",
+        "watchAssets": true
+      }
     ],
     "watchAssets": true
   }

@@ -1477,6 +1477,7 @@ export class ReportService {
     const name = 'activity-attendance-pdf.html';
     const candidates = [
       path.join(__dirname, 'templates', name),
+      path.join(process.cwd(), 'dist', 'src', 'report', 'templates', name),
       path.join(process.cwd(), 'dist', 'report', 'templates', name),
       path.join(process.cwd(), 'src', 'report', 'templates', name),
     ];
@@ -1777,6 +1778,7 @@ export class ReportService {
     const name = 'fish-ranking-sheet-pdf.html';
     const candidates = [
       path.join(__dirname, 'templates', name),
+      path.join(process.cwd(), 'dist', 'src', 'report', 'templates', name),
       path.join(process.cwd(), 'dist', 'report', 'templates', name),
       path.join(process.cwd(), 'src', 'report', 'templates', name),
     ];

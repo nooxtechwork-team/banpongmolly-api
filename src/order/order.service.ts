@@ -1238,6 +1238,27 @@ export class OrderService {
       .replace(/"/g, '&quot;');
   }
 
+  /**
+   * โหลด HTML template ของใบเสร็จ
+   * - prod Docker: dist/src/order/*.js → templates อยู่ข้างกัน (nest assets → dist/src)
+   * - build เก่า: อาจยังอยู่ที่ dist/order/templates
+   * - dev: src/order/templates
+   */
+  private readOrderTemplate(name: string): string {
+    const candidates = [
+      path.join(__dirname, 'templates', name),
+      path.join(process.cwd(), 'dist', 'src', 'order', 'templates', name),
+      path.join(process.cwd(), 'dist', 'order', 'templates', name),
+      path.join(process.cwd(), 'src', 'order', 'templates', name),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p, 'utf8');
+      }
+    }
+    throw new Error(`Missing order template: ${name}`);
+  }
+
   /** หัวใบเสร็จ: ชื่อบัญชี / ธนาคาร / ประเภท / เลขบัญชี จาก payment_configs (fallback ถ้ายังไม่ตั้งค่า) */
   private buildReceiptPaymentCompanyInfoHtml(
     cfg: PaymentConfig | null,
@@ -1326,18 +1347,7 @@ export class OrderService {
         maximumFractionDigits: 2,
       });
 
-    // รองรับทั้งตอนรันจาก dist และจาก src (dev mode)
-    let templatePath = path.join(__dirname, 'templates', 'receipt.html');
-    if (!fs.existsSync(templatePath)) {
-      templatePath = path.join(
-        process.cwd(),
-        'src',
-        'order',
-        'templates',
-        'receipt.html',
-      );
-    }
-    let html = fs.readFileSync(templatePath, 'utf8');
+    let html = this.readOrderTemplate('receipt.html');
 
     const paymentCfg = await this.paymentConfigService.getConfig();
     const paymentCompanyInfo =
@@ -1437,22 +1447,7 @@ export class OrderService {
       maximumFractionDigits: 2,
     });
 
-    // โหลด HTML email template (รองรับทั้ง dist และ src)
-    let emailTemplatePath = path.join(
-      __dirname,
-      'templates',
-      'receipt-email.html',
-    );
-    if (!fs.existsSync(emailTemplatePath)) {
-      emailTemplatePath = path.join(
-        process.cwd(),
-        'src',
-        'order',
-        'templates',
-        'receipt-email.html',
-      );
-    }
-    let emailHtml = fs.readFileSync(emailTemplatePath, 'utf8');
+    let emailHtml = this.readOrderTemplate('receipt-email.html');
     emailHtml = emailHtml
       .replace(/{{order_no}}/g, order.order_no)
       .replace(/{{total_amount}}/g, formattedTotal);
