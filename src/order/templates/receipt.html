@@ -2,7 +2,7 @@
 <html lang="th">
   <head>
     <meta charset="utf-8" />
-    <title>Receipt</title>
+    <title>ใบเสร็จรับเงิน</title>
     <style>
       @page {
         size: A4 portrait;
@@ -12,172 +12,379 @@
         box-sizing: border-box;
       }
       body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-          sans-serif;
-        font-size: 12px;
-        color: #111827;
+        font-family: 'Sarabun', 'Noto Sans Thai', 'Segoe UI', system-ui,
+          -apple-system, sans-serif;
+        font-size: 11px;
+        color: #1a1a1a;
         padding: 0;
         margin: 0;
         background-color: #ffffff;
+        line-height: 1.45;
       }
       .page {
         width: 210mm;
         min-height: 297mm;
         margin: 0;
         background-color: #ffffff;
-        padding: 10mm 12mm 8mm;
+        padding: 14mm 16mm 12mm;
       }
+
+      /* Header */
       .header {
-        padding: 10px 4px 12px;
-        border-bottom: 3px solid #e5e7eb;
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
+        margin-bottom: 18px;
       }
-      .brand {
-        font-size: 22px;
-        font-weight: 800;
-        letter-spacing: 0.06em;
-      }
-      .brand span {
-        color: #e6ba09; /* golden accent */
-      }
-      .invoice-banner {
-        margin: 0 4px;
-        margin-top: 12px;
-        padding: 10px 12px;
-        background: linear-gradient(90deg, #bf9a04, #d2ad04);
-        border-radius: 4px;
-        font-size: 12px;
-        color: #ffffff;
-      }
-      .invoice-title {
+      .doc-title {
+        font-size: 26px;
         font-weight: 700;
+        letter-spacing: 0.02em;
+        line-height: 1.15;
+        color: #111111;
       }
-      .section {
-        margin: 16px 4px 0;
-        font-size: 11px;
+      .doc-title-en {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: #555555;
+        margin-top: 2px;
+        letter-spacing: 0.04em;
       }
-      .section-box {
-        border: 1px solid #e5e7eb;
-        border-radius: 2px;
-        padding: 10px 12px;
-        background-color: #ffffff;
-      }
-      .row {
+      .brand-block {
         display: flex;
-        justify-content: space-between;
+        align-items: center;
+        justify-content: flex-end;
         gap: 12px;
+        text-align: right;
       }
-      .col {
-        flex: 1;
+      .brand-logo {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+        flex-shrink: 0;
       }
-      .label {
-        font-weight: 600;
-        margin-bottom: 4px;
+      .brand-text {
+        text-align: right;
       }
-      .muted {
-        color: #6b7280;
+      .brand-name {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        color: #111111;
       }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 8px;
+      .brand-sub {
+        font-size: 10px;
+        color: #666666;
+        margin-top: 2px;
       }
-      th,
-      td {
-        border: 1px solid #d1d5db;
-        padding: 6px 8px;
-        font-size: 11px;
-      }
-      th {
-        background: #f3f4f6;
+      .doc-title-block {
         text-align: left;
       }
-      .total-table {
-        width: 260px;
-        margin-left: auto;
-        margin-top: 8px;
+
+      /* Meta grid */
+      .meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 14px;
       }
-      .total-table td {
+      .meta-left,
+      .meta-right {
+        flex: 1;
+      }
+      .meta-right {
+        text-align: right;
+      }
+      .field {
+        margin-bottom: 4px;
+      }
+      .field-label {
+        display: inline-block;
+        min-width: 72px;
+        font-weight: 600;
+        color: #333333;
+      }
+      .meta-right .field-label {
+        min-width: 56px;
+        text-align: left;
+      }
+      .field-value {
+        color: #1a1a1a;
+      }
+
+      .divider {
         border: none;
-        padding: 3px 0;
+        border-top: 1px dotted #9ca3af;
+        margin: 12px 0;
       }
-      .total-label {
-        text-align: right;
-        color: #4b5563;
+
+      .issuer {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 16px;
       }
-      .total-value {
-        width: 120px;
-        text-align: right;
+      .issuer-left {
+        flex: 1;
       }
-      .total-strong {
+
+      /* Items table */
+      .items-wrap {
+        margin-top: 4px;
+        border-top: 2px solid #222222;
+        border-bottom: 2px solid #222222;
+      }
+      table.items {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      table.items th {
+        background: #4b5563;
+        color: #ffffff;
         font-weight: 700;
-        color: #f97316;
-      }
-      .footer {
-        margin: 22px 4px 4px;
         font-size: 10px;
+        padding: 8px 6px;
         text-align: center;
-        color: #6b7280;
+        border: 1px solid #374151;
+      }
+      table.items th.col-desc {
+        text-align: left;
+        padding-left: 10px;
+      }
+      table.items td {
+        border: 1px solid #d1d5db;
+        padding: 7px 6px;
+        font-size: 11px;
+        vertical-align: top;
+      }
+      table.items td.num {
+        text-align: center;
+        width: 48px;
+      }
+      table.items td.desc {
+        text-align: left;
+        padding-left: 10px;
+      }
+      table.items td.qty {
+        text-align: center;
+        width: 56px;
+      }
+      table.items td.money {
+        text-align: right;
+        width: 100px;
+        padding-right: 10px;
+        white-space: nowrap;
+      }
+      table.items tbody tr {
+        height: 28px;
+      }
+
+      /* Totals */
+      .totals {
+        width: 280px;
+        margin-left: auto;
+        margin-top: 10px;
+        border-collapse: collapse;
+      }
+      .totals td {
+        padding: 5px 8px;
+        font-size: 11px;
+        border: none;
+      }
+      .totals .label {
+        text-align: right;
+        color: #374151;
+      }
+      .totals .value {
+        text-align: right;
+        width: 110px;
+        white-space: nowrap;
+      }
+      .totals .grand {
+        background: #e5e7eb;
+        font-weight: 700;
+      }
+      .totals .grand td {
+        padding: 7px 8px;
+      }
+
+      /* Payment */
+      .payment {
+        margin-top: 28px;
+        border-top: 2px solid #222222;
+        padding-top: 12px;
+      }
+      .payment-title {
+        font-weight: 700;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      .payment-account {
+        color: #374151;
+        margin-bottom: 10px;
+        line-height: 1.5;
+      }
+      .pay-method {
+        margin: 6px 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .checkbox {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 1.5px solid #222222;
+        margin-top: 2px;
+        flex-shrink: 0;
+        position: relative;
+      }
+      .checkbox.on::after {
+        content: '';
+        position: absolute;
+        left: 2px;
+        top: 0px;
+        width: 5px;
+        height: 8px;
+        border: solid #111111;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+      .pay-detail {
+        color: #4b5563;
+        font-size: 10px;
+        margin-left: 4px;
+      }
+
+      .footer {
+        margin-top: 36px;
+        text-align: center;
+        font-size: 9px;
+        color: #9ca3af;
       }
     </style>
   </head>
   <body>
     <div class="page">
       <div class="header">
-        <div class="brand"><span>BANPONG</span>MOLLY</div>
-        <div class="company-info">{{payment_company_info}}</div>
+        <div class="doc-title-block">
+          <div class="doc-title">
+            ใบเสร็จรับเงิน
+            <span class="doc-title-en">Receipt</span>
+          </div>
+        </div>
+        <div class="brand-block">
+          <div class="brand-text">
+            <div class="brand-name">BANPONG MOLLY</div>
+            <div class="brand-sub">ระบบลงทะเบียนกิจกรรม</div>
+          </div>
+          <img
+            class="brand-logo"
+            src="{{logo_src}}"
+            width="56"
+            height="56"
+            alt="Banpong Molly"
+          />
+        </div>
       </div>
 
-      <div class="invoice-banner">
-        <span class="invoice-title">ใบเสร็จรับเงิน / Receipt #{{order_no}}</span>
-      </div>
-
-      <div class="section">
-        <div class="section-box">
-          <div class="row">
-            <div class="col">
-              <div class="label">รายละเอียดใบเสร็จ</div>
-              <div>เลขที่คำสั่งซื้อ: {{order_no}}</div>
-              <div>วันที่ออกใบเสร็จ: {{date}}</div>
-              <div>งานกิจกรรม: {{activity_title}}</div>
-            </div>
-            <div class="col">
-              <div class="label">ออกให้</div>
-              <div>{{customer_name}}</div>
-            </div>
+      <div class="meta">
+        <div class="meta-left">
+          <div class="field">
+            <span class="field-label">ลูกค้า</span>
+            <span class="field-value">{{customer_name}}</span>
+          </div>
+          <div class="field">
+            <span class="field-label">เบอร์ติดต่อ</span>
+            <span class="field-value">{{customer_phone}}</span>
+          </div>
+          <div class="field">
+            <span class="field-label">อีเมล</span>
+            <span class="field-value">{{customer_email}}</span>
+          </div>
+        </div>
+        <div class="meta-right">
+          <div class="field">
+            <span class="field-label">เลขที่</span>
+            <span class="field-value">{{order_no}}</span>
+          </div>
+          <div class="field">
+            <span class="field-label">วันที่</span>
+            <span class="field-value">{{date}}</span>
+          </div>
+          <div class="field">
+            <span class="field-label">กิจกรรม</span>
+            <span class="field-value">{{activity_title}}</span>
           </div>
         </div>
       </div>
 
-      <div class="section">
-        <div class="label">รายละเอียดรายการ</div>
-        <table>
+      <hr class="divider" />
+
+      <div class="issuer">
+        <div class="issuer-left">
+          <div class="field">
+            <span class="field-label">ผู้ออก</span>
+            <span class="field-value">{{issuer_name}}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="items-wrap">
+        <table class="items">
           <thead>
             <tr>
-              <th>รายละเอียด</th>
-              <th style="width: 120px; text-align: right;">ยอด (บาท)</th>
+              <th style="width: 48px;">ลำดับที่</th>
+              <th class="col-desc">รายละเอียด</th>
+              <th style="width: 56px;">จำนวน</th>
+              <th style="width: 100px;">ราคาต่อหน่วย</th>
+              <th style="width: 100px;">รวมเป็นเงิน</th>
             </tr>
           </thead>
           <tbody>
             {{lines}}
           </tbody>
         </table>
+      </div>
 
-        <table class="total-table">
-          <tr>
-            <td class="total-label">ยอดรวมรายการ</td>
-            <td class="total-value total-strong">{{total_amount}} บาท</td>
-          </tr>
-        </table>
+      <table class="totals">
+        <tr>
+          <td class="label">ราคารวมสินค้า (บาท)</td>
+          <td class="value">{{total_amount}}.-</td>
+        </tr>
+        <tr>
+          <td class="label">อื่นๆ</td>
+          <td class="value">{{other_amount}}.-</td>
+        </tr>
+        <tr class="grand">
+          <td class="label">จำนวนเงินรวมทั้งสิ้น (บาท)</td>
+          <td class="value">{{total_amount}}.-</td>
+        </tr>
+      </table>
+
+      <div class="payment">
+        <div class="payment-title">ข้อมูลการชำระเงิน:</div>
+        <div class="payment-account">{{payment_company_info}}</div>
+
+        <div class="pay-method">
+          <span class="checkbox {{payment_cash_class}}"></span>
+          <div>
+            <strong>เงินสด</strong>
+            <span class="pay-detail">{{cash_details}}</span>
+          </div>
+        </div>
+        <div class="pay-method">
+          <span class="checkbox {{payment_transfer_class}}"></span>
+          <div>
+            <strong>เงินโอน</strong>
+          </div>
+        </div>
       </div>
 
       <div class="footer">
-        เอกสารนี้สร้างจากระบบ Banpong Molly
-        สำหรับใช้ยืนยันการชำระเงินเท่านั้น
+        เอกสารนี้สร้างจากระบบ Banpong Molly สำหรับใช้ยืนยันการชำระเงินเท่านั้น
       </div>
     </div>
   </body>
 </html>
-

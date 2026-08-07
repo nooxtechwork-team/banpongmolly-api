@@ -1259,30 +1259,56 @@ export class OrderService {
     throw new Error(`Missing order template: ${name}`);
   }
 
-  /** หัวใบเสร็จ: ชื่อบัญชี / ธนาคาร / ประเภท / เลขบัญชี จาก payment_configs (fallback ถ้ายังไม่ตั้งค่า) */
-  private buildReceiptPaymentCompanyInfoHtml(
-    cfg: PaymentConfig | null,
-  ): string {
+  /** โลโก้ใบเสร็จเป็น data URI — Puppeteer setContent โหลดไฟล์ภายนอกไม่ได้ */
+  private resolveReceiptLogoSrc(): string {
+    const candidates = [
+      path.join(__dirname, 'templates', 'brand-logo.png'),
+      path.join(
+        process.cwd(),
+        'dist',
+        'src',
+        'order',
+        'templates',
+        'brand-logo.png',
+      ),
+      path.join(process.cwd(), 'dist', 'order', 'templates', 'brand-logo.png'),
+      path.join(process.cwd(), 'src', 'order', 'templates', 'brand-logo.png'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const buf = fs.readFileSync(p);
+        return `data:image/png;base64,${buf.toString('base64')}`;
+      }
+    }
+    return '';
+  }
+
+  /** ข้อมูลบัญชีสำหรับใบเสร็จ จาก payment_configs (พร้อม fallback) */
+  private resolveReceiptPaymentAccount(cfg: PaymentConfig | null): {
+    issuerName: string;
+    infoHtml: string;
+  } {
     const esc = (s: string) => this.escapeHtmlForReceipt(s);
-    const lines: string[] = [];
-    if (cfg) {
-      const name = cfg.bank_account_name?.trim();
-      const bank = cfg.bank_name?.trim();
-      const accType = cfg.bank_account_type?.trim();
-      const accNo = cfg.bank_account_no?.trim();
-      if (name) lines.push(esc(name));
-      if (bank) lines.push(`ธนาคาร: ${esc(bank)}`);
-      if (accType) lines.push(`ประเภทบัญชี: ${esc(accType)}`);
-      if (accNo) lines.push(`เลขที่บัญชี: ${esc(accNo)}`);
-    }
-    if (lines.length > 0) {
-      return lines.join('<br />');
-    }
-    return [
-      esc('นาย ชัยวาลย์ วสวานนท์'),
-      `ธนาคาร: ${esc('กสิกรไทย')}`,
-      `เลขที่บัญชี: ${esc('225-8-66347-3')}`,
-    ].join('<br />');
+    const fallbackName = 'นาย ชัยวาลย์ วสวานนท์';
+    const fallbackBank = 'กสิกรไทย';
+    const fallbackAccNo = '225-8-66347-3';
+
+    const name = cfg?.bank_account_name?.trim() || fallbackName;
+    const bank = cfg?.bank_name?.trim() || fallbackBank;
+    const accType = cfg?.bank_account_type?.trim() || '';
+    const accNo = cfg?.bank_account_no?.trim() || fallbackAccNo;
+
+    const lines: string[] = [
+      `ชื่อบัญชี: ${esc(name)}`,
+      `ธนาคาร: ${esc(bank)}`,
+    ];
+    if (accType) lines.push(`ประเภทบัญชี: ${esc(accType)}`);
+    lines.push(`เลขที่บัญชี: ${esc(accNo)}`);
+
+    return {
+      issuerName: name,
+      infoHtml: lines.join('<br />'),
+    };
   }
 
   /**
@@ -1313,15 +1339,6 @@ export class OrderService {
           const base = displayName
             ? displayName
             : `ค่าสมัครแพ็กเกจ #${e.package_id}`;
-          // const code =
-          //   e.entry_code != null && String(e.entry_code).trim() !== ''
-          //     ? String(e.entry_code).trim()
-          //     : e.index !== undefined &&
-          //         e.index !== null &&
-          //         String(e.index) !== ''
-          //       ? String(e.index)
-          //       : '';
-          // const prefix = code ? `[${code}] ` : '';
           return {
             label: `${base}`,
             amount: e.line_total,
@@ -1347,42 +1364,90 @@ export class OrderService {
         maximumFractionDigits: 2,
       });
 
+    const esc = (s: string) => this.escapeHtmlForReceipt(s);
+
     let html = this.readOrderTemplate('receipt.html');
 
     const paymentCfg = await this.paymentConfigService.getConfig();
-    const paymentCompanyInfo =
-      this.buildReceiptPaymentCompanyInfoHtml(paymentCfg);
+    const { issuerName, infoHtml: paymentCompanyInfo } =
+      this.resolveReceiptPaymentAccount(paymentCfg);
 
-    const linesHtml = lines.length
-      ? lines
-          .map(
-            (l) =>
-              `<tr><td>${l.label}</td><td style="text-align:right;">${formatAmount(
-                l.amount,
-              )}</td></tr>`,
-          )
-          .join('')
-      : `<tr><td>ยอดชำระทั้งหมด</td><td style="text-align:right;">${formatAmount(
-          Number(order.total_amount),
-        )}</td></tr>`;
+    const receiptLines =
+      lines.length > 0
+        ? lines
+        : [
+            {
+              label: 'ยอดชำระทั้งหมด',
+              amount: Number(order.total_amount),
+            },
+          ];
+
+    const minRows = 6;
+    const rowParts: string[] = receiptLines.map((l, i) => {
+      const amount = formatAmount(l.amount);
+      return `<tr>
+              <td class="num">${i + 1}</td>
+              <td class="desc">${esc(l.label)}</td>
+              <td class="qty">1</td>
+              <td class="money">${amount}.-</td>
+              <td class="money">${amount}.-</td>
+            </tr>`;
+    });
+    while (rowParts.length < minRows) {
+      rowParts.push(
+        `<tr>
+              <td class="num">&nbsp;</td>
+              <td class="desc">&nbsp;</td>
+              <td class="qty">&nbsp;</td>
+              <td class="money">&nbsp;</td>
+              <td class="money">&nbsp;</td>
+            </tr>`,
+      );
+    }
+    const linesHtml = rowParts.join('');
+
+    const isCash = order.payment_method === PaymentMethod.CASH;
+    const receiptDate = (order.paid_at ?? order.created_at).toLocaleString(
+      'th-TH',
+      {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      },
+    );
+
+    let cashDetails = '';
+    if (isCash) {
+      const cashAmt =
+        order.cash_received_amount != null
+          ? formatAmount(Number(order.cash_received_amount))
+          : formatAmount(Number(order.total_amount));
+      cashDetails = `วันที่ ${receiptDate} / จำนวน ${cashAmt} บาท`;
+    }
+
+    const phone = order.customer_phone?.trim() || '-';
+    const emailRaw = order.customer_email?.trim() || '';
+    const email =
+      emailRaw && !emailRaw.toLowerCase().endsWith('@line.local')
+        ? emailRaw
+        : '-';
 
     html = html
-      .replace(/{{order_no}}/g, order.order_no)
-      .replace(
-        /{{date}}/g,
-        order.created_at.toLocaleString('th-TH', {
-          year: 'numeric',
-          month: 'short',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      )
-      .replace(/{{customer_name}}/g, customerName)
-      .replace(/{{activity_title}}/g, activityTitle || '')
+      .replace(/{{logo_src}}/g, this.resolveReceiptLogoSrc())
+      .replace(/{{order_no}}/g, esc(order.order_no))
+      .replace(/{{date}}/g, esc(receiptDate))
+      .replace(/{{customer_name}}/g, esc(customerName || '-'))
+      .replace(/{{customer_phone}}/g, esc(phone))
+      .replace(/{{customer_email}}/g, esc(email))
+      .replace(/{{activity_title}}/g, esc(activityTitle || '-'))
+      .replace(/{{issuer_name}}/g, esc(issuerName))
       .replace(/{{total_amount}}/g, formatAmount(Number(order.total_amount)))
+      .replace(/{{other_amount}}/g, formatAmount(0))
       .replace(/{{lines}}/g, linesHtml)
-      .replace(/{{payment_company_info}}/g, paymentCompanyInfo);
+      .replace(/{{payment_company_info}}/g, paymentCompanyInfo)
+      .replace(/{{payment_cash_class}}/g, isCash ? 'on' : '')
+      .replace(/{{payment_transfer_class}}/g, isCash ? '' : 'on')
+      .replace(/{{cash_details}}/g, esc(cashDetails));
 
     return this.receiptPuppeteer.htmlToPdfBuffer(html);
   }
