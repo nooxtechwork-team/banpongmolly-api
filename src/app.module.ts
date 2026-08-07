@@ -30,6 +30,7 @@ import { ActivityRegistrationModule } from './activity-registration/activity-reg
 import { QueueModule } from './queue/queue.module';
 import { PrintJobModule } from './print-job/print-job.module';
 import { CheckoutQueueModule } from './checkout-queue/checkout-queue.module';
+import { FishPhotoModule } from './fish-photo/fish-photo.module';
 import { getDatabaseConfig } from './config/database.config';
 
 @Module({
@@ -69,6 +70,7 @@ import { getDatabaseConfig } from './config/database.config';
     EntryPopupModule,
     HeroBannerModule,
     FishMasterModule,
+    FishPhotoModule,
     ReportModule,
   ],
   controllers: [AppController],

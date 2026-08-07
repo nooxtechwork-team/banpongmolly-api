@@ -43,6 +43,7 @@ import { CheckoutTicket } from '../entities/checkout-ticket.entity';
 import { CheckoutTicketItem } from '../entities/checkout-ticket-item.entity';
 import { CheckoutTicketEvent } from '../entities/checkout-ticket-event.entity';
 import { CheckoutQueueSettings } from '../entities/checkout-queue-settings.entity';
+import { FishPhoto } from '../entities/fish-photo.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -101,6 +102,7 @@ export const getDatabaseConfig = (
     CheckoutTicketItem,
     CheckoutTicketEvent,
     CheckoutQueueSettings,
+    FishPhoto,
   ],
   synchronize: process.env.NODE_ENV === 'development', // Set to false in production
   logging: process.env.NODE_ENV === 'development',
