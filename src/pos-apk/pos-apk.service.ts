@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -245,7 +244,8 @@ export class PosApkService {
     const ok = await bcrypt.compare(password, settings.password_hash);
     if (!ok) {
       this.recordFail(ip);
-      throw new UnauthorizedException('รหัสผ่านไม่ถูกต้อง');
+      // ใช้ 403 ไม่ใช่ 401 — ฝั่ง web axios จะเคลียร์ cookie login ถ้าได้ 401
+      throw new ForbiddenException('รหัสผ่านไม่ถูกต้อง');
     }
     this.clearFails(ip);
 
@@ -284,11 +284,11 @@ export class PosApkService {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
     } catch {
-      throw new UnauthorizedException('ลิงก์ดาวน์โหลดหมดอายุหรือไม่ถูกต้อง');
+      throw new ForbiddenException('ลิงก์ดาวน์โหลดหมดอายุหรือไม่ถูกต้อง');
     }
 
     if (payload.purpose !== DOWNLOAD_TOKEN_PURPOSE || !payload.releaseId) {
-      throw new UnauthorizedException('โทเคนไม่ถูกต้อง');
+      throw new ForbiddenException('โทเคนไม่ถูกต้อง');
     }
 
     const release = await this.releaseRepo.findOne({

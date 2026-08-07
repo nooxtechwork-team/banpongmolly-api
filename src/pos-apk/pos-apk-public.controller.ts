@@ -1,12 +1,12 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Post,
   Query,
   Req,
   Res,
-  UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PosApkService } from './pos-apk.service';
@@ -38,7 +38,7 @@ export class PosApkPublicController {
     @Res() res: Response,
   ): Promise<void> {
     if (!token?.trim()) {
-      throw new UnauthorizedException('ไม่พบโทเคนดาวน์โหลด');
+      throw new ForbiddenException('ไม่พบโทเคนดาวน์โหลด');
     }
     const { stream, filename, size } =
       await this.posApkService.openDownloadStream(token.trim());
