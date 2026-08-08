@@ -4,9 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
+import { DataSource, In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
 import { Order, OrderStatus, OrderType, PaymentMethod } from '../entities/order.entity';
-import { generateReferenceNo } from '../common/utils/reference-no.util';
+import {
+  formatOrderNo,
+  isValidOrderActivityCode,
+  normalizeOrderActivityCode,
+  orderActivityCodeFromIndex,
+  orderNoCounterScopeKey,
+  suggestOrderActivityCodeFromText,
+} from '../common/utils/reference-no.util';
 import { ActivityRegistration } from '../entities/activity-registration.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorRegistration, SponsorTier } from '../entities/sponsor.entity';
@@ -48,6 +55,7 @@ export class OrderService {
     private readonly activityPackageRepository: Repository<ActivityPackage>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly dataSource: DataSource,
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
     private readonly checkInGateway: CheckInGateway,
@@ -56,6 +64,121 @@ export class OrderService {
     private readonly activityRegistrationService: ActivityRegistrationService,
     private readonly entryService: ActivityRegistrationEntryService,
   ) {}
+
+  /**
+   * ออก order_no แบบ ORD{รหัสกิจกรรม A–Z 2–3 ตัว}{running 4 หลัก} นับต่อกิจกรรม
+   * เช่น ORDBPM0001, ORDBPM0002, ...
+   */
+  private async nextOrderNo(activityId: number): Promise<string> {
+    const activityCode = await this.resolveActivityOrderCode(activityId);
+    const scopeKey = orderNoCounterScopeKey(activityId);
+    const seq = await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `INSERT INTO order_no_counters (scope_key, seq_value)
+         VALUES (?, 0)
+         ON DUPLICATE KEY UPDATE scope_key = scope_key`,
+        [scopeKey],
+      );
+      await manager.query(
+        `UPDATE order_no_counters
+         SET seq_value = seq_value + 1
+         WHERE scope_key = ?`,
+        [scopeKey],
+      );
+      const rows: Array<{ seq_value: number | string }> = await manager.query(
+        `SELECT seq_value FROM order_no_counters WHERE scope_key = ?`,
+        [scopeKey],
+      );
+      const raw = rows?.[0]?.seq_value;
+      const value = typeof raw === 'string' ? Number(raw) : Number(raw);
+      if (!Number.isFinite(value) || value < 1) {
+        throw new BadRequestException('ไม่สามารถออกเลขคำสั่งซื้อได้');
+      }
+      return value;
+    });
+    return formatOrderNo(activityCode, seq);
+  }
+
+  /** อ่าน/จัดสรรรหัสกิจกรรมตัวอักษรสำหรับ order_no (ไม่ซ้ำ) */
+  private async resolveActivityOrderCode(activityId: number): Promise<string> {
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId, deleted_at: IsNull() },
+    });
+    if (!activity) {
+      throw new NotFoundException('ไม่พบกิจกรรมสำหรับออกเลขคำสั่งซื้อ');
+    }
+
+    const existing = normalizeOrderActivityCode(activity.order_code);
+    if (existing && isValidOrderActivityCode(existing)) {
+      return existing;
+    }
+
+    const code = await this.allocateUniqueActivityOrderCode({
+      preferred: null,
+      title: activity.title,
+      slug: activity.slug,
+      excludeActivityId: activity.id,
+    });
+    activity.order_code = code;
+    await this.activityRepository.save(activity);
+    return code;
+  }
+
+  private async isActivityOrderCodeTaken(
+    code: string,
+    excludeActivityId?: number,
+  ): Promise<boolean> {
+    const qb = this.activityRepository
+      .createQueryBuilder('activity')
+      .where('activity.order_code = :code', { code })
+      .andWhere('activity.deleted_at IS NULL');
+    if (excludeActivityId != null) {
+      qb.andWhere('activity.id != :excludeId', { excludeId: excludeActivityId });
+    }
+    return !!(await qb.getOne());
+  }
+
+  private async allocateUniqueActivityOrderCode(options: {
+    preferred?: string | null;
+    title?: string | null;
+    slug?: string | null;
+    excludeActivityId?: number;
+  }): Promise<string> {
+    const preferred = normalizeOrderActivityCode(options.preferred);
+    if (preferred) {
+      if (!isValidOrderActivityCode(preferred)) {
+        throw new BadRequestException(
+          'รหัสคำสั่งซื้อของกิจกรรมต้องเป็นตัวอักษรภาษาอังกฤษ 2–3 ตัว (A–Z)',
+        );
+      }
+      if (await this.isActivityOrderCodeTaken(preferred, options.excludeActivityId)) {
+        throw new BadRequestException(
+          `รหัสคำสั่งซื้อ «${preferred}» ถูกใช้กับกิจกรรมอื่นแล้ว กรุณาเลือกชุดอื่น`,
+        );
+      }
+      return preferred;
+    }
+
+    const candidates = [
+      suggestOrderActivityCodeFromText(options.title ?? ''),
+      suggestOrderActivityCodeFromText(options.slug ?? ''),
+    ].filter((c): c is string => !!c && isValidOrderActivityCode(c));
+
+    for (const candidate of candidates) {
+      if (!(await this.isActivityOrderCodeTaken(candidate, options.excludeActivityId))) {
+        return candidate;
+      }
+    }
+
+    const max = 26 * 26 * 26;
+    for (let i = 0; i < max; i++) {
+      const code = orderActivityCodeFromIndex(i);
+      if (!(await this.isActivityOrderCodeTaken(code, options.excludeActivityId))) {
+        return code;
+      }
+    }
+    throw new BadRequestException('ไม่สามารถจัดสรรรหัสคำสั่งซื้อของกิจกรรมได้');
+  }
 
   private async loadPackageSlugPathFromLayer2ByLeafIds(
     leafIds: number[],
@@ -140,6 +263,7 @@ export class OrderService {
 
   async createActivityRegistrationOrder(params: {
     registrationId: number;
+    activityId: number;
     applicantName: string;
     phone: string;
     email?: string | null;
@@ -154,8 +278,9 @@ export class OrderService {
     const paymentMethod =
       params.paymentMethod ?? PaymentMethod.BANK_TRANSFER;
     const markPaid = params.markPaid === true;
+    const orderNo = await this.nextOrderNo(params.activityId);
     const entity = this.orderRepository.create({
-      order_no: generateReferenceNo('ORD'),
+      order_no: orderNo,
       type: OrderType.ACTIVITY_REGISTRATION,
       refer_id: params.registrationId,
       user_id: params.userId ?? null,
@@ -192,14 +317,16 @@ export class OrderService {
 
   async createSponsorOrder(params: {
     sponsorId: number;
+    activityId: number;
     contactName: string;
     phone: string;
     email?: string | null;
     totalAmount: number;
     userId?: number | null;
   }): Promise<Order> {
+    const orderNo = await this.nextOrderNo(params.activityId);
     const entity = this.orderRepository.create({
-      order_no: generateReferenceNo('ORD'),
+      order_no: orderNo,
       type: OrderType.SPONSOR,
       refer_id: params.sponsorId,
       user_id: params.userId ?? null,

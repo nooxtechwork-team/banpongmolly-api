@@ -21,6 +21,7 @@ import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.ent
 import { SponsorRegistration } from '../entities/sponsor.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { Order } from '../entities/order.entity';
+import { OrderNoCounter } from '../entities/order-no-counter.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { AccessLog } from '../entities/access-log.entity';
 import { LoginLog } from '../entities/login-log.entity';
@@ -97,6 +98,7 @@ export const getDatabaseConfig = (
     SponsorRegistration,
     SponsorPackage,
     Order,
+    OrderNoCounter,
     AuditLog,
     AccessLog,
     LoginLog,

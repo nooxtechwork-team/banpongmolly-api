@@ -23,7 +23,13 @@ import { UpdateActivityDto } from './dto/update-activity.dto';
 import { UploadService } from '../upload/upload.service';
 import { ActivityPackageService } from '../activity-package/activity-package.service';
 import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
-import { generateReferenceNo } from '../common/utils/reference-no.util';
+import {
+  generateReferenceNo,
+  isValidOrderActivityCode,
+  normalizeOrderActivityCode,
+  orderActivityCodeFromIndex,
+  suggestOrderActivityCodeFromText,
+} from '../common/utils/reference-no.util';
 import {
   ActivityLiveEmbed,
   parseActivityLiveEmbedsJson,
@@ -371,6 +377,7 @@ export class ActivityService {
     // สร้าง Order สำหรับ workflow การชำระเงิน/ติดตามต่อ
     const order = await this.orderService.createActivityRegistrationOrder({
       registrationId: saved.id,
+      activityId: activity.id,
       applicantName: saved.applicant_name,
       phone: saved.phone,
       email: saved.email,
@@ -499,6 +506,7 @@ export class ActivityService {
 
     const order = await this.orderService.createActivityRegistrationOrder({
       registrationId: saved.id,
+      activityId: activity.id,
       applicantName: saved.applicant_name,
       phone: saved.phone,
       email: saved.email,
@@ -717,6 +725,78 @@ export class ActivityService {
       throw new NotFoundException('ไม่พบกิจกรรม');
     }
     return event;
+  }
+
+  /**
+   * ตรวจว่ารหัส order_code ว่าง/ใช้ได้ และไม่ซ้ำกับกิจกรรมอื่น
+   */
+  private async assertOrderCodeAvailable(
+    code: string,
+    excludeActivityId?: number,
+  ): Promise<void> {
+    if (!isValidOrderActivityCode(code)) {
+      throw new BadRequestException(
+        'รหัสคำสั่งซื้อของกิจกรรมต้องเป็นตัวอักษรภาษาอังกฤษ 2–3 ตัว (A–Z)',
+      );
+    }
+    const qb = this.activityRepository
+      .createQueryBuilder('activity')
+      .where('activity.order_code = :code', { code })
+      .andWhere('activity.deleted_at IS NULL');
+    if (excludeActivityId != null) {
+      qb.andWhere('activity.id != :excludeId', { excludeId: excludeActivityId });
+    }
+    const taken = await qb.getOne();
+    if (taken) {
+      throw new BadRequestException(
+        `รหัสคำสั่งซื้อ «${code}» ถูกใช้กับกิจกรรมอื่นแล้ว กรุณาเลือกชุดอื่น`,
+      );
+    }
+  }
+
+  /**
+   * จัดสรรรหัส order_code ที่ไม่ซ้ำ — ใช้ค่าที่ส่งมา หรือเสนอจากชื่อ แล้วค่อยวิ่ง AAA…
+   */
+  private async allocateUniqueOrderCode(options: {
+    preferred?: string | null;
+    title?: string | null;
+    slug?: string | null;
+    excludeActivityId?: number;
+  }): Promise<string> {
+    const preferred = normalizeOrderActivityCode(options.preferred);
+    if (preferred) {
+      await this.assertOrderCodeAvailable(preferred, options.excludeActivityId);
+      return preferred;
+    }
+
+    const candidates = [
+      suggestOrderActivityCodeFromText(options.title ?? ''),
+      suggestOrderActivityCodeFromText(options.slug ?? ''),
+    ].filter((c): c is string => !!c && isValidOrderActivityCode(c));
+
+    for (const candidate of candidates) {
+      try {
+        await this.assertOrderCodeAvailable(
+          candidate,
+          options.excludeActivityId,
+        );
+        return candidate;
+      } catch {
+        // ลองตัวถัดไป
+      }
+    }
+
+    const max = 26 * 26 * 26;
+    for (let i = 0; i < max; i++) {
+      const code = orderActivityCodeFromIndex(i);
+      try {
+        await this.assertOrderCodeAvailable(code, options.excludeActivityId);
+        return code;
+      } catch {
+        // ต่อ
+      }
+    }
+    throw new BadRequestException('ไม่สามารถจัดสรรรหัสคำสั่งซื้อของกิจกรรมได้');
   }
 
   /** Admin detail — รวม competition_dashboard จากตาราง */
@@ -1001,10 +1081,18 @@ export class ActivityService {
       throw new BadRequestException('กรุณาอัปโหลดรูปหน้าปกของกิจกรรม');
     }
 
+    const slug = dto.slug ?? (slugify(dto.title) || `activity-${Date.now()}`);
+    const orderCode = await this.allocateUniqueOrderCode({
+      preferred: dto.order_code,
+      title: dto.title,
+      slug,
+    });
+
     const entity = this.activityRepository.create({
       organizer_id: dto.organizer_id ?? null,
       title: dto.title,
-      slug: dto.slug ?? (slugify(dto.title) || `activity-${Date.now()}`),
+      slug,
+      order_code: orderCode,
       cover_image,
       banner_image,
       description: dto.description ?? null,
@@ -1061,6 +1149,16 @@ export class ActivityService {
 
     if (dto.title !== undefined) updates.title = dto.title;
     if (dto.slug !== undefined) updates.slug = dto.slug;
+    if (dto.order_code !== undefined) {
+      const nextCode = normalizeOrderActivityCode(dto.order_code);
+      if (!nextCode) {
+        throw new BadRequestException(
+          'รหัสคำสั่งซื้อของกิจกรรมต้องเป็นตัวอักษรภาษาอังกฤษ 2–3 ตัว (A–Z)',
+        );
+      }
+      await this.assertOrderCodeAvailable(nextCode, id);
+      updates.order_code = nextCode;
+    }
     if (dto.description !== undefined) updates.description = dto.description;
     if (dto.location !== undefined) updates.location_name = dto.location;
     if (dto.location_address !== undefined) {

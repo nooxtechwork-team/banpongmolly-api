@@ -30,6 +30,13 @@ export class Activity {
   @Column({ type: 'varchar', length: 255 })
   slug: string;
 
+  /**
+   * รหัสสั้นสำหรับเลขคำสั่งซื้อ (ตัวอักษร A–Z 2–3 ตัว ไม่ซ้ำ)
+   * เช่น BPM → order_no = ORDBPM0001
+   */
+  @Column({ type: 'varchar', length: 3, unique: true, nullable: true })
+  order_code: string | null;
+
   @Column({ type: 'varchar', length: 512, nullable: true })
   cover_image: string | null;
 

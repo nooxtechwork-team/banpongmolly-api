@@ -27,7 +27,7 @@ export class Order {
   @PrimaryGeneratedColumn()
   id: number;
 
-  /** รหัสอ้างอิง (ตัวอักษรผสมตัวเลข) เช่น ORD20260225X9Y8Z7 */
+  /** รหัสอ้างอิง เช่น ORDBPM0001 (ORD + รหัสกิจกรรมตัวอักษร + running) */
   @Column({ name: 'order_no', type: 'varchar', length: 32, unique: true })
   order_no: string;
 

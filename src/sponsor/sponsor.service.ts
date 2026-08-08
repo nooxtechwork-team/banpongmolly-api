@@ -357,6 +357,7 @@ export class SponsorService {
     // สร้าง Order ผูกกับการสมัครสปอนเซอร์นี้
     const order = await this.orderService.createSponsorOrder({
       sponsorId: saved.id,
+      activityId: saved.activity_id,
       contactName: saved.contact_name,
       phone: saved.contact_phone,
       email: saved.contact_email,

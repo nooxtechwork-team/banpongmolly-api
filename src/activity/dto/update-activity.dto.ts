@@ -31,6 +31,12 @@ export class UpdateActivityDto {
   @MaxLength(255)
   slug?: string;
 
+  /** รหัสสั้นสำหรับเลข ORD เช่น BPM → ORDBPM0001 (A–Z 2–3 ตัว ไม่ซ้ำ) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  order_code?: string;
+
   @IsOptional()
   @IsString()
   description?: string;
