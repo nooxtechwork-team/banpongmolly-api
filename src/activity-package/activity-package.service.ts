@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, In } from 'typeorm';
 import { ActivityPackage } from '../entities/activity-package.entity';
@@ -327,6 +327,85 @@ export class ActivityPackageService {
       await this.priceRepository.save(price);
     }
     await this.emitPriceUpdated(id, null);
+  }
+
+  /**
+   * ตั้งราคาเดียวกันทั้งชุดแพ็กเกจ (root + ลูกหลานทั้งหมด)
+   * อัปเดตเฉพาะรายการที่มีราคาอยู่แล้ว — ไม่สร้างราคาใหม่ให้รายการที่ยังไม่เคยตั้ง
+   */
+  async bulkUpdateExistingPrices(
+    rootPackageId: number,
+    amount: number,
+  ): Promise<{ updated: number; skipped: number; price: number }> {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException('ราคาต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป');
+    }
+    const nextAmount = Number(amount);
+
+    const root = await this.packageRepository.findOne({
+      where: { id: rootPackageId, deleted_at: IsNull() },
+    });
+    if (!root) {
+      throw new NotFoundException('ไม่พบแพ็กเกจ');
+    }
+
+    const packageIds = await this.collectSubtreePackageIds(rootPackageId);
+    if (!packageIds.length) {
+      return { updated: 0, skipped: 0, price: nextAmount };
+    }
+
+    const prices = await this.priceRepository.find({
+      where: {
+        package_id: In(packageIds),
+        deleted_at: IsNull(),
+      },
+    });
+
+    let updated = 0;
+    for (const price of prices) {
+      const prev = Number(price.amount);
+      if (prev === nextAmount && price.is_active) {
+        continue;
+      }
+      price.amount = nextAmount;
+      price.is_active = true;
+      await this.priceRepository.save(price);
+      updated += 1;
+      if (prev !== nextAmount) {
+        await this.emitPriceUpdated(price.package_id, nextAmount);
+      }
+    }
+
+    const skipped = packageIds.length - prices.length;
+    return { updated, skipped, price: nextAmount };
+  }
+
+  /** รวม id ของโหนดรากและลูกหลานทั้งหมดในชุด */
+  private async collectSubtreePackageIds(rootId: number): Promise<number[]> {
+    const packages = await this.packageRepository.find({
+      where: { deleted_at: IsNull() },
+      select: ['id', 'parent_id'],
+    });
+    const childrenByParent = new Map<number, number[]>();
+    for (const pkg of packages) {
+      if (pkg.parent_id == null) continue;
+      const list = childrenByParent.get(pkg.parent_id) ?? [];
+      list.push(pkg.id);
+      childrenByParent.set(pkg.parent_id, list);
+    }
+
+    const out: number[] = [];
+    const stack = [rootId];
+    const seen = new Set<number>();
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+      const kids = childrenByParent.get(id);
+      if (kids?.length) stack.push(...kids);
+    }
+    return out;
   }
 
   private async setSinglePrice(
