@@ -60,6 +60,21 @@ export const getDatabaseConfig = (
   // Store/compare epoch ms for reclaim; force UTC for remaining datetime fields.
   timezone: 'Z',
   dateStrings: false,
+  /**
+   * ตอน bootstrap ถ้า DB ยังไม่พร้อม (เช่น Coolify/compose ขึ้นช้ากว่า API)
+   * TypeORM จะลองเชื่อมใหม่ตามค่านี้ก่อน fail ทั้งโปรเซส
+   */
+  retryAttempts: Number(configService.get('DATABASE_RETRY_ATTEMPTS') ?? 20),
+  retryDelay: Number(configService.get('DATABASE_RETRY_DELAY_MS') ?? 3000),
+  extra: {
+    // mysql2 pool — ลดการหลุด connection ค้าง / idle timeout
+    connectionLimit: Number(configService.get('DATABASE_POOL_SIZE') ?? 10),
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10_000,
+    connectTimeout: Number(
+      configService.get('DATABASE_CONNECT_TIMEOUT_MS') ?? 10_000,
+    ),
+  },
   entities: [
     User,
     UserAuth,

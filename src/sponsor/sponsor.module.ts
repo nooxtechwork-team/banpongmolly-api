@@ -4,12 +4,14 @@ import { SponsorRegistration } from '../entities/sponsor.entity';
 import { Activity } from '../entities/activity.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
 import { SponsorTierLookup } from '../entities/sponsor-tier.entity';
+import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { ActivityModule } from '../activity/activity.module';
 import { OrderModule } from '../order/order.module';
 import { SponsorService } from './sponsor.service';
 import { SponsorAdminController } from './sponsor.controller';
 import { SponsorPackageService } from './sponsor-package.service';
 import { SponsorPackageAdminController } from './sponsor-package.controller';
+import { SponsorPackageGateway } from './sponsor-package.gateway';
 import { PublicSponsorController } from './public-sponsor.controller';
 import { SponsorTierService } from './sponsor-tier.service';
 import { SponsorTierAdminController } from './sponsor-tier-admin.controller';
@@ -24,12 +26,19 @@ import { UserActionLogModule } from '../user-action-log/user-action-log.module';
       Activity,
       SponsorPackage,
       SponsorTierLookup,
+      ActivitySponsorPackage,
     ]),
     ActivityModule,
     OrderModule,
     UserActionLogModule,
   ],
-  providers: [SponsorService, SponsorPackageService, SponsorTierService, AdminGuard],
+  providers: [
+    SponsorService,
+    SponsorPackageService,
+    SponsorPackageGateway,
+    SponsorTierService,
+    AdminGuard,
+  ],
   controllers: [
     SponsorAdminController,
     SponsorPackageAdminController,

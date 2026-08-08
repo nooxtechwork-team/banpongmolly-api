@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ActivitySponsorPackage } from '../entities/activity-sponsor-package.entity';
 import { SponsorPackage } from '../entities/sponsor-package.entity';
+import { SponsorPackageGateway } from './sponsor-package.gateway';
 
 export interface SponsorPackageListParams {
   page?: number;
@@ -16,6 +18,9 @@ export class SponsorPackageService {
   constructor(
     @InjectRepository(SponsorPackage)
     private readonly pkgRepo: Repository<SponsorPackage>,
+    @InjectRepository(ActivitySponsorPackage)
+    private readonly activitySponsorPkgRepo: Repository<ActivitySponsorPackage>,
+    private readonly packageGateway: SponsorPackageGateway,
   ) {}
 
   async listAdmin(
@@ -83,14 +88,56 @@ export class SponsorPackageService {
     }>,
   ): Promise<SponsorPackage> {
     const entity = await this.findOne(id);
+    const prevAmount = Number(entity.amount);
+    const prevActive = !!entity.is_active;
     Object.assign(entity, payload);
-    return this.pkgRepo.save(entity);
+    const saved = await this.pkgRepo.save(entity);
+    const nextAmount = Number(saved.amount);
+    const nextActive = !!saved.is_active;
+    if (prevAmount !== nextAmount || prevActive !== nextActive) {
+      await this.emitPackagesUpdated(
+        saved.id,
+        nextAmount,
+        nextActive,
+      );
+    }
+    return saved;
   }
 
   async softDelete(id: number): Promise<void> {
     const entity = await this.findOne(id);
+    if (!entity.is_active) return;
     entity.is_active = false;
     await this.pkgRepo.save(entity);
+    await this.emitPackagesUpdated(entity.id, Number(entity.amount), false);
+  }
+
+  private async emitPackagesUpdated(
+    sponsorPackageId: number,
+    amount: number | null,
+    isActive: boolean | null,
+  ): Promise<void> {
+    try {
+      const links = await this.activitySponsorPkgRepo.find({
+        where: { sponsor_package_id: sponsorPackageId },
+        select: ['activity_id'],
+      });
+      const seen = new Set<number>();
+      for (const link of links) {
+        const activityId = Number(link.activity_id);
+        if (!Number.isFinite(activityId) || activityId < 1 || seen.has(activityId)) {
+          continue;
+        }
+        seen.add(activityId);
+        this.packageGateway.notifyActivitySponsorPackagesUpdated(
+          activityId,
+          sponsorPackageId,
+          amount,
+          isActive,
+        );
+      }
+    } catch {
+      // realtime เป็น best-effort — ไม่ให้กระทบการบันทึกแพ็กเกจ
+    }
   }
 }
-
