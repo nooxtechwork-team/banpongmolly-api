@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { ActivityTagService, ActivityTagDto } from './activity-tag.service';
 import { ActivityStatus } from '../entities/activity.entity';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
+import { ReorderHomepageFeaturedDto } from './dto/reorder-homepage-featured.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { Audit } from '../common/decorators/audit.decorator';
@@ -38,15 +40,27 @@ export class ActivityController {
     @Query('limit') limit?: string,
     @Query('status') status?: ActivityStatus,
     @Query('search') search?: string,
+    @Query('featured') featured?: string,
+    @Query('sort') sort?: string,
   ): Promise<{ items: Activity[]; total: number } | Activity[]> {
     const pageNum = page ? Math.max(1, parseInt(page, 10) || 1) : undefined;
     const limitNum = limit
       ? Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
       : undefined;
+
+    let featuredFilter: boolean | undefined;
+    if (featured === 'true' || featured === '1') featuredFilter = true;
+    else if (featured === 'false' || featured === '0') featuredFilter = false;
+
+    const sortOpt =
+      sort === 'featured' ? ('featured' as const) : ('start_date' as const);
+
     if (pageNum !== undefined && limitNum !== undefined) {
       return this.activityService.findPaginated(pageNum, limitNum, {
         status,
         search,
+        featured: featuredFilter,
+        sort: sortOpt,
       });
     }
     return this.activityService.findAll();
@@ -89,6 +103,15 @@ export class ActivityController {
     return this.activityService.create(dto);
   }
 
+  @Put('homepage-featured/reorder')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity',
+  })
+  async reorderHomepageFeatured(@Body() dto: ReorderHomepageFeaturedDto) {
+    return this.activityService.reorderHomepageFeatured(dto.ids);
+  }
+
   @Patch(':id')
   @Audit({
     action: 'edit',
@@ -113,6 +136,19 @@ export class ActivityController {
     @Body() body: { featured: boolean },
   ): Promise<Activity> {
     return this.activityService.setHomepageFeatured(id, !!body.featured);
+  }
+
+  @Patch(':id/homepage-featured-sort')
+  @Audit({
+    action: 'edit',
+    entity_type: 'activity',
+    entityIdSource: 'param:id',
+  })
+  async setHomepageFeaturedSort(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { sort?: number },
+  ): Promise<Activity> {
+    return this.activityService.setHomepageFeaturedSort(id, Number(body?.sort));
   }
 
   @Patch(':id/sponsor-packages')

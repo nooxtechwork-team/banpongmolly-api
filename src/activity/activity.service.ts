@@ -118,7 +118,7 @@ export class ActivityService {
   }
 
   /**
-   * รายการกิจกรรมที่ให้แสดงในส่วน "งานประกวดแนะนำ" บนหน้าแรก
+   * รายการกิจกรรมที่ให้แสดงในส่วน "กิจกรรมแนะนำ" บนหน้าแรก
    */
   async listFeaturedForHomepage(): Promise<
     {
@@ -133,6 +133,7 @@ export class ActivityService {
       status: ActivityStatus;
       registration_open_at: Date | null;
       registration_deadline: Date | null;
+      homepage_featured_sort: number;
     }[]
   > {
     const qb = this.activityRepository
@@ -141,7 +142,8 @@ export class ActivityService {
       .andWhere('activity.is_featured_homepage = :featured', {
         featured: true,
       })
-      .orderBy('activity.start_date', 'ASC')
+      .orderBy('activity.homepage_featured_sort', 'ASC')
+      .addOrderBy('activity.start_date', 'ASC')
       .addOrderBy('activity.created_at', 'DESC');
 
     const items = await qb.getMany();
@@ -158,6 +160,7 @@ export class ActivityService {
       status: a.status,
       registration_open_at: a.registration_open_at,
       registration_deadline: a.registration_deadline,
+      homepage_featured_sort: Number(a.homepage_featured_sort ?? 0),
     }));
   }
 
@@ -551,6 +554,10 @@ export class ActivityService {
     options?: {
       status?: ActivityStatus;
       search?: string;
+      /** กรองเฉพาะที่แสดง / ไม่แสดงบนหน้าแรก */
+      featured?: boolean;
+      /** featured = แนะนำขึ้นก่อน แล้วตามวันเริ่มงาน */
+      sort?: 'start_date' | 'featured';
     },
   ): Promise<{ items: Activity[]; total: number }> {
     const qb = this.activityRepository
@@ -563,6 +570,16 @@ export class ActivityService {
       });
     }
 
+    if (options?.featured === true) {
+      qb.andWhere('activity.is_featured_homepage = :featured', {
+        featured: true,
+      });
+    } else if (options?.featured === false) {
+      qb.andWhere('activity.is_featured_homepage = :featured', {
+        featured: false,
+      });
+    }
+
     if (options?.search) {
       const q = `%${options.search.trim()}%`;
       qb.andWhere(
@@ -571,7 +588,13 @@ export class ActivityService {
       );
     }
 
-    qb.orderBy('activity.start_date', 'DESC');
+    if (options?.sort === 'featured') {
+      qb.orderBy('activity.is_featured_homepage', 'DESC')
+        .addOrderBy('activity.homepage_featured_sort', 'ASC')
+        .addOrderBy('activity.start_date', 'DESC');
+    } else {
+      qb.orderBy('activity.start_date', 'DESC');
+    }
 
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const [items, total] = await qb
@@ -763,8 +786,98 @@ export class ActivityService {
    */
   async setHomepageFeatured(id: number, featured: boolean): Promise<Activity> {
     const activity = await this.findOne(id);
-    activity.is_featured_homepage = !!featured;
+    const next = !!featured;
+    if (next && !activity.is_featured_homepage) {
+      const raw = await this.activityRepository
+        .createQueryBuilder('activity')
+        .select('MAX(activity.homepage_featured_sort)', 'max')
+        .where('activity.deleted_at IS NULL')
+        .andWhere('activity.is_featured_homepage = :featured', {
+          featured: true,
+        })
+        .getRawOne<{ max: string | number | null }>();
+      const maxSort = Number(raw?.max ?? 0);
+      activity.homepage_featured_sort =
+        Number.isFinite(maxSort) && maxSort > 0 ? maxSort + 1 : 1;
+    }
+    if (!next) {
+      activity.homepage_featured_sort = 0;
+    }
+    activity.is_featured_homepage = next;
     return this.activityRepository.save(activity);
+  }
+
+  /**
+   * จัดลำดับกิจกรรมแนะนำบนหน้าแรก (ids เรียงจากซ้าย/บนไปขวา/ล่าง)
+   */
+  async reorderHomepageFeatured(ids: number[]): Promise<Activity[]> {
+    const uniqueIds = [...new Set(ids.map((id) => Number(id)).filter((id) => id > 0))];
+    if (!uniqueIds.length) {
+      throw new BadRequestException('กรุณาระบุลำดับกิจกรรมแนะนำ');
+    }
+
+    const rows = await this.activityRepository.find({
+      where: {
+        id: In(uniqueIds),
+        is_featured_homepage: true,
+        deleted_at: IsNull(),
+      },
+    });
+    if (rows.length !== uniqueIds.length) {
+      throw new BadRequestException(
+        'พบกิจกรรมที่ไม่ใช่กิจกรรมแนะนำ หรือไม่ถูกต้องในรายการจัดลำดับ',
+      );
+    }
+
+    const orderMap = new Map(uniqueIds.map((id, index) => [id, index + 1]));
+    for (const row of rows) {
+      row.homepage_featured_sort = orderMap.get(row.id) ?? row.homepage_featured_sort;
+    }
+    await this.activityRepository.save(rows);
+
+    return this.activityRepository.find({
+      where: { is_featured_homepage: true, deleted_at: IsNull() },
+      order: {
+        homepage_featured_sort: 'ASC',
+        start_date: 'ASC',
+        id: 'ASC',
+      },
+    });
+  }
+
+  /**
+   * ตั้งตำแหน่งลำดับของกิจกรรมแนะนำ (1 = ขึ้นก่อนสุด)
+   * ถ้ายังไม่ใช่แนะนำ จะเปิดแนะนำให้อัตโนมัติ
+   */
+  async setHomepageFeaturedSort(
+    id: number,
+    position: number,
+  ): Promise<Activity> {
+    const pos = Math.round(Number(position));
+    if (!Number.isFinite(pos) || pos < 1) {
+      throw new BadRequestException('ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป');
+    }
+
+    let activity = await this.findOne(id);
+    if (!activity.is_featured_homepage) {
+      activity = await this.setHomepageFeatured(id, true);
+    }
+
+    const featured = await this.activityRepository.find({
+      where: { is_featured_homepage: true, deleted_at: IsNull() },
+      order: {
+        homepage_featured_sort: 'ASC',
+        start_date: 'ASC',
+        id: 'ASC',
+      },
+    });
+
+    const others = featured.map((row) => row.id).filter((fid) => fid !== id);
+    const target = Math.min(others.length + 1, Math.max(1, pos)) - 1;
+    const nextIds = [...others];
+    nextIds.splice(target, 0, id);
+    await this.reorderHomepageFeatured(nextIds);
+    return this.findOne(id);
   }
 
   /**

@@ -107,6 +107,10 @@ export class Activity {
   @Column({ type: 'boolean', default: false })
   is_featured_homepage: boolean;
 
+  /** ลำดับแสดงบนหน้าแรก (เลขน้อย = ขึ้นก่อน) — ใช้เมื่อ is_featured_homepage = true */
+  @Column({ type: 'int', default: 0 })
+  homepage_featured_sort: number;
+
   /** จำกัดเช็คอิน QR ให้อยู่ในรัศมีจากพิกัดกิจกรรม */
   @Column({ type: 'boolean', default: false })
   check_in_geofence_enabled: boolean;
