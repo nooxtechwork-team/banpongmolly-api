@@ -5,6 +5,7 @@ import { ActivityPackage } from '../entities/activity-package.entity';
 import { ActivityPackagePrice } from '../entities/activity-package-price.entity';
 import { CreateActivityPackageDto } from './dto/create-activity-package.dto';
 import { UpdateActivityPackageDto } from './dto/update-activity-package.dto';
+import { ActivityPackageGateway } from './activity-package.gateway';
 
 export interface ActivityPackageWithPrice {
   id: number;
@@ -35,6 +36,7 @@ export class ActivityPackageService {
     private readonly packageRepository: Repository<ActivityPackage>,
     @InjectRepository(ActivityPackagePrice)
     private readonly priceRepository: Repository<ActivityPackagePrice>,
+    private readonly packageGateway: ActivityPackageGateway,
   ) {}
 
   /**
@@ -324,6 +326,7 @@ export class ActivityPackageService {
       price.deleted_at = new Date();
       await this.priceRepository.save(price);
     }
+    await this.emitPriceUpdated(id, null);
   }
 
   private async setSinglePrice(
@@ -334,10 +337,16 @@ export class ActivityPackageService {
       where: { package_id: packageId, deleted_at: IsNull() },
     });
 
+    const previousAmount =
+      existing != null ? Number(existing.amount) : null;
+    const nextAmount =
+      amount === undefined || amount === null ? null : Number(amount);
+
     if (amount === undefined || amount === null) {
       if (existing) {
         existing.deleted_at = new Date();
         await this.priceRepository.save(existing);
+        await this.emitPriceUpdated(packageId, null);
       }
       return;
     }
@@ -346,6 +355,9 @@ export class ActivityPackageService {
       existing.amount = amount;
       existing.is_active = true;
       await this.priceRepository.save(existing);
+      if (previousAmount !== nextAmount) {
+        await this.emitPriceUpdated(packageId, nextAmount);
+      }
       return;
     }
 
@@ -355,5 +367,39 @@ export class ActivityPackageService {
       is_active: true,
     });
     await this.priceRepository.save(price);
+    await this.emitPriceUpdated(packageId, nextAmount);
+  }
+
+  private async findPackageRootId(packageId: number): Promise<number> {
+    let current = await this.packageRepository.findOne({
+      where: { id: packageId, deleted_at: IsNull() },
+    });
+    if (!current) return packageId;
+
+    // ป้องกันวน loop ถ้าข้อมูล parent พัง
+    for (let i = 0; i < 64 && current.parent_id; i += 1) {
+      const parent = await this.packageRepository.findOne({
+        where: { id: current.parent_id, deleted_at: IsNull() },
+      });
+      if (!parent) break;
+      current = parent;
+    }
+    return current.id;
+  }
+
+  private async emitPriceUpdated(
+    packageId: number,
+    amount: number | null,
+  ): Promise<void> {
+    try {
+      const rootId = await this.findPackageRootId(packageId);
+      this.packageGateway.notifyPackageTreePricesUpdated(
+        rootId,
+        packageId,
+        amount,
+      );
+    } catch {
+      // realtime เป็น best-effort — ไม่ให้กระทบการบันทึกราคา
+    }
   }
 }

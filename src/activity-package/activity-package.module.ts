@@ -4,14 +4,15 @@ import { ActivityPackage } from '../entities/activity-package.entity';
 import { ActivityPackagePrice } from '../entities/activity-package-price.entity';
 import { ActivityPackageService } from './activity-package.service';
 import { ActivityPackageController } from './activity-package.controller';
+import { ActivityPackageGateway } from './activity-package.gateway';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ActivityPackage, ActivityPackagePrice]),
   ],
-  providers: [ActivityPackageService, AdminGuard],
+  providers: [ActivityPackageService, ActivityPackageGateway, AdminGuard],
   controllers: [ActivityPackageController],
-  exports: [ActivityPackageService],
+  exports: [ActivityPackageService, ActivityPackageGateway],
 })
 export class ActivityPackageModule {}
