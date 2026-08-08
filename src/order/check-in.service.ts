@@ -79,6 +79,15 @@ export interface MyCheckInActivityItem {
   check_in_close_at: string | null;
 }
 
+/** รายการปลาในกิจกรรมสำหรับหน้าเช็คอิน (ไม่ต้องสแกน QR) */
+export interface MyCheckInActivityEntries {
+  activity_id: number;
+  pending_count: number;
+  checked_in_count: number;
+  entry_count: number;
+  entries: CheckInSelfPreviewEntry[];
+}
+
 export interface CheckInSelfPreviewEntry {
   entry_id: number;
   registration_id: number;
@@ -776,6 +785,120 @@ export class CheckInService {
         check_in_window: group.checkInWindow,
       };
     });
+  }
+
+  /**
+   * รายการปลาทั้งหมดของผู้ใช้ในกิจกรรมนี้ (รอเช็คอิน / เช็คอินแล้ว)
+   * ใช้แสดงบนหน้า /profile/check-in/:activityId โดยไม่ต้องสแกน QR ก่อน
+   */
+  async listMyActivityEntries(
+    userId: number,
+    activityId: number,
+  ): Promise<MyCheckInActivityEntries> {
+    const activity = await this.activityRepository.findOne({
+      where: { id: activityId },
+    });
+    if (!activity || activity.deleted_at) {
+      throw new NotFoundException('ไม่พบกิจกรรม');
+    }
+
+    const regRows = await this.findPaidRegistrationRowsForActivity(
+      userId,
+      activityId,
+    );
+    if (!regRows.length) {
+      return {
+        activity_id: activityId,
+        pending_count: 0,
+        checked_in_count: 0,
+        entry_count: 0,
+        entries: [],
+      };
+    }
+
+    const packageIdSet = new Set<number>();
+    const loaded: {
+      reg: ActivityRegistration;
+      entryLines: ActivityRegistrationEntryLine[];
+    }[] = [];
+
+    for (const row of regRows) {
+      const reg = await this.registrationRepository.findOne({
+        where: { id: row.registration_id },
+      });
+      if (!reg) continue;
+      const entryLines =
+        await this.entryService.resolveLinesForRegistration(reg);
+      for (const line of entryLines) {
+        packageIdSet.add(Number(line.package_id));
+      }
+      loaded.push({ reg, entryLines });
+    }
+
+    const packageNameById = await this.entryService.resolvePackageLeafNames([
+      ...packageIdSet,
+    ]);
+
+    const entries: CheckInSelfPreviewEntry[] = [];
+    for (const { reg, entryLines } of loaded) {
+      const legacyCheckedIn = !!reg.checked_in_at;
+      const previewEntries = this.entryLinesToPreviewEntries(
+        reg.id,
+        entryLines,
+        packageNameById,
+      );
+      for (const entry of previewEntries) {
+        if (legacyCheckedIn && !entry.already_checked_in) {
+          entries.push({
+            ...entry,
+            already_checked_in: true,
+            checked_in_at:
+              entry.checked_in_at ??
+              (reg.checked_in_at ? reg.checked_in_at.toISOString() : null),
+          });
+        } else {
+          entries.push(entry);
+        }
+      }
+      // ไม่มีรายการปลา — นับเป็น 1 รายการตามสถานะใบสมัคร
+      if (!previewEntries.length) {
+        entries.push({
+          entry_id: -reg.id,
+          registration_id: reg.id,
+          package_name: 'ใบสมัคร',
+          quantity: 1,
+          unit_price: 0,
+          line_total: 0,
+          entry_code: reg.registration_no,
+          entry_index: null,
+          already_checked_in: !!reg.checked_in_at,
+          checked_in_at: reg.checked_in_at
+            ? reg.checked_in_at.toISOString()
+            : null,
+        });
+      }
+    }
+
+    entries.sort((a, b) => {
+      const codeA = (a.entry_code ?? '').trim();
+      const codeB = (b.entry_code ?? '').trim();
+      if (codeA && codeB) {
+        const cmp = codeA.localeCompare(codeB, 'th', { numeric: true });
+        if (cmp !== 0) return cmp;
+      }
+      return a.entry_id - b.entry_id;
+    });
+
+    const pending_count = entries.filter((e) => !e.already_checked_in).length;
+    const checked_in_count = entries.length - pending_count;
+
+    return {
+      activity_id: activityId,
+      pending_count,
+      checked_in_count,
+      entry_count: entries.length,
+      entries,
+    };
   }
 
   /**

@@ -25,6 +25,14 @@ export class MyCheckInController {
     return this.checkInService.listMyCheckInActivities(req.user.id);
   }
 
+  @Get('activities/:activityId/entries')
+  async listActivityEntries(
+    @Request() req: { user: User },
+    @Param('activityId', ParseIntPipe) activityId: number,
+  ) {
+    return this.checkInService.listMyActivityEntries(req.user.id, activityId);
+  }
+
   @Post('preview')
   async previewScan(
     @Request() req: { user: User },
